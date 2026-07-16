@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 from pathlib import Path
 
 
@@ -11,6 +12,7 @@ class SourceConfig:
     type: str
     root: Path | None = None
     url_prefix: str | None = None
+    settings: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

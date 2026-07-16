@@ -17,15 +17,25 @@ database = "{tmp_path / "index.sqlite3"}"
 name = "Notes"
 type = "local"
 root = "{root}"
+
+[sources.work]
+name = "Work Confluence"
+type = "confluence"
+base_url = "https://example.atlassian.net/wiki"
+email = "rich@example.com"
+api_token_env = "ATLASSIAN_API_TOKEN"
+space_keys = ["ARCH"]
 """
     )
 
     sources = load_sources(config)
 
     assert configured_db_path(config) == tmp_path / "index.sqlite3"
-    assert len(sources) == 1
+    assert len(sources) == 2
     assert sources[0].key == "notes"
     assert sources[0].name == "Notes"
     assert sources[0].type == "local"
     assert sources[0].root == root
-
+    assert sources[1].key == "work"
+    assert sources[1].type == "confluence"
+    assert sources[1].settings["space_keys"] == ["ARCH"]

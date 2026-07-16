@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from lazylens.config import configured_db_path, load_sources
 from lazylens.db import Index
-from lazylens.indexers.local import iter_local_items
+from lazylens.indexers.adapters import IndexingError, iter_source_items
 from lazylens.models import SourceConfig
 from lazylens.paths import data_home, default_config_path, default_db_path
 
@@ -34,10 +35,8 @@ Run lazylens index after changing configured local folders. Later versions shoul
 
 
 def index_source(index: Index, source: SourceConfig) -> int:
-    if source.type != "local":
-        raise NotImplementedError(f"{source.type} sources are not implemented yet")
     index.upsert_source(source)
-    return index.upsert_items(iter_local_items(source))
+    return index.upsert_items(iter_source_items(source))
 
 
 def render_config(*, database: Path, key: str, name: str, root: Path) -> str:
@@ -102,10 +101,16 @@ def command_index(args: argparse.Namespace) -> int:
         print(f"Unknown source: {args.source}", file=sys.stderr)
         return 1
     with Index(db_path) as index:
+        failed = False
         for source in selected:
-            count = index_source(index, source)
+            try:
+                count = index_source(index, source)
+            except (IndexingError, RuntimeError, OSError) as exc:
+                failed = True
+                print(f"Index failed for {source.name}: {exc}", file=sys.stderr)
+                continue
             print(f"Indexed {count} items from {source.name} into {index.path}")
-    return 0
+    return 1 if failed else 0
 
 
 def command_init(args: argparse.Namespace) -> int:
@@ -138,8 +143,7 @@ def command_demo(args: argparse.Namespace) -> int:
     source = SourceConfig(key="demo", name="Demo Project", type="local", root=demo_root)
     append_demo_source(config_path, source=source, database=database, force=args.force_config)
     with Index(database) as index:
-        index.upsert_source(source)
-        count = index.upsert_items(iter_local_items(source))
+        count = index_source(index, source)
     print(f"Demo documents: {demo_root}")
     print(f"Config: {config_path}")
     print(f"Indexed {count} demo items into {database}")
@@ -168,7 +172,15 @@ def command_doctor(args: argparse.Namespace) -> int:
     print(f"Sources: {len(sources)} configured")
     for source in sources:
         root = source.root if source.root else "(none)"
-        status = "OK" if source.root and source.root.exists() else "missing"
+        if source.type == "local":
+            status = "OK" if source.root and source.root.exists() else "missing"
+        elif source.type == "confluence":
+            token_env = str(source.settings.get("api_token_env", "ATLASSIAN_API_TOKEN"))
+            token_status = "set" if os.environ.get(token_env) else "missing"
+            status = "OK" if source.settings.get("base_url") and source.settings.get("email") else "missing config"
+            status = f"{status}; token env: {token_env} ({token_status})"
+        else:
+            status = "unsupported"
         print(f"  {source.key}: {source.type} | {root} | {status}")
     if db_path.exists():
         with Index(db_path) as index:

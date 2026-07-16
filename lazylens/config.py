@@ -31,6 +31,7 @@ def load_sources(config_path: str | Path | None = None) -> list[SourceConfig]:
             continue
         source_type = str(values.get("type", "local"))
         root_value = values.get("root")
+        known_keys = {"name", "type", "root", "url_prefix"}
         sources.append(
             SourceConfig(
                 key=str(key),
@@ -38,6 +39,7 @@ def load_sources(config_path: str | Path | None = None) -> list[SourceConfig]:
                 type=source_type,
                 root=expand_path(str(root_value)) if root_value else None,
                 url_prefix=str(values["url_prefix"]) if "url_prefix" in values else None,
+                settings={str(option): value for option, value in values.items() if option not in known_keys},
             )
         )
     return sources
@@ -49,4 +51,3 @@ def configured_db_path(config_path: str | Path | None = None) -> Path:
         return default_db_path()
     data = tomllib.loads(path.read_text())
     return expand_path(str(data.get("database", default_db_path())))
-

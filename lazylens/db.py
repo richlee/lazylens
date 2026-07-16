@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from lazylens.models import IndexedItem, SearchResult, SourceConfig
+from lazylens.models import CategorySummary, IndexedItem, SearchResult, SourceConfig, SourceSummary
 from lazylens.paths import default_db_path
 
 
@@ -125,28 +125,47 @@ class Index:
         self.connection.commit()
         return count
 
-    def search(self, query: str, *, limit: int = 20) -> list[SearchResult]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        source_key: str | None = None,
+        category: str | None = None,
+    ) -> list[SearchResult]:
+        filters = []
+        params: list[object] = []
+        if source_key:
+            filters.append("items.source_key = ?")
+            params.append(source_key)
+        if category:
+            filters.append("items.category = ?")
+            params.append(category)
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+
         if not query.strip():
             rows = self.connection.execute(
-                """
+                f"""
                 SELECT items.*, 0.0 AS rank
                 FROM items
+                {where}
                 ORDER BY modified_at DESC, title COLLATE NOCASE
                 LIMIT ?
                 """,
-                (limit,),
+                (*params, limit),
             ).fetchall()
         else:
+            search_filters = ["item_fts MATCH ?", *filters]
             rows = self.connection.execute(
-                """
+                f"""
                 SELECT items.*, bm25(item_fts) AS rank
                 FROM item_fts
                 JOIN items ON items.id = item_fts.item_id
-                WHERE item_fts MATCH ?
+                WHERE {' AND '.join(search_filters)}
                 ORDER BY rank
                 LIMIT ?
                 """,
-                (query, limit),
+                (query, *params, limit),
             ).fetchall()
         return [
             SearchResult(
@@ -169,6 +188,56 @@ class Index:
     def item_count(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) AS count FROM items").fetchone()
         return int(row["count"])
+
+    def sources(self) -> list[SourceSummary]:
+        rows = self.connection.execute(
+            """
+            SELECT sources.key, sources.name, sources.type, COUNT(items.id) AS count
+            FROM sources
+            LEFT JOIN items ON items.source_key = sources.key
+            GROUP BY sources.key, sources.name, sources.type
+            ORDER BY sources.name COLLATE NOCASE
+            """
+        ).fetchall()
+        return [
+            SourceSummary(
+                key=str(row["key"]),
+                name=str(row["name"]),
+                type=str(row["type"]),
+                count=int(row["count"]),
+            )
+            for row in rows
+        ]
+
+    def categories(self, *, source_key: str | None = None) -> list[CategorySummary]:
+        if source_key:
+            rows = self.connection.execute(
+                """
+                SELECT category, COUNT(*) AS count
+                FROM items
+                WHERE source_key = ?
+                GROUP BY category
+                ORDER BY category COLLATE NOCASE
+                """,
+                (source_key,),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                """
+                SELECT category, COUNT(*) AS count
+                FROM items
+                GROUP BY category
+                ORDER BY category COLLATE NOCASE
+                """
+            ).fetchall()
+        return [
+            CategorySummary(
+                key=str(row["category"]),
+                name=str(row["category"]) or "Uncategorised",
+                count=int(row["count"]),
+            )
+            for row in rows
+        ]
 
     def _migrate(self) -> None:
         columns = {

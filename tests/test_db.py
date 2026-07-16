@@ -35,6 +35,15 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert results[0].category == "Architecture"
     assert results[0].container == "architecture"
 
+    with Index(db_path) as index:
+        sources = index.sources()
+        categories = index.categories(source_key="local")
+
+    assert sources[0].name == "Local"
+    assert sources[0].count == 1
+    assert categories[0].name == "Architecture"
+    assert categories[0].count == 1
+
 
 def test_index_migrates_existing_database(tmp_path: Path) -> None:
     db_path = tmp_path / "old.sqlite3"

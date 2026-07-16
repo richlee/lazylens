@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import webbrowser
+from pathlib import Path
+
+from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Header, Input, Label, ListItem, ListView, Static
+
+from lazylens.config import configured_db_path, load_sources
+from lazylens.db import Index
+from lazylens.indexers.local import iter_local_items
+from lazylens.models import CategorySummary, SearchResult, SourceConfig, SourceSummary
+
+
+class CategoryItem(ListItem):
+    def __init__(self, category: CategorySummary | None) -> None:
+        self.category_key = category.key if category else None
+        label = "All" if category is None else category.name
+        count = "" if category is None else f" ({category.count})"
+        super().__init__(Label(f"{label}{count}", markup=False))
+
+
+class ResultItem(ListItem):
+    def __init__(self, result: SearchResult) -> None:
+        self.result = result
+        super().__init__(Label(result.title, markup=False))
+
+
+class LazylensApp(App[None]):
+    TITLE = "lazylens"
+    BINDINGS = [
+        Binding("/", "focus_search", "Search", show=False),
+        Binding("c", "clear_search", "Clear Search", show=False),
+        Binding("r", "refresh_index", "Refresh", show=False),
+        Binding("enter", "open_selected", "Open", show=False),
+        Binding("q", "quit", "Quit", show=False),
+        Binding("1", "select_source(1)", "Source 1", show=False),
+        Binding("2", "select_source(2)", "Source 2", show=False),
+        Binding("3", "select_source(3)", "Source 3", show=False),
+        Binding("4", "select_source(4)", "Source 4", show=False),
+        Binding("5", "select_source(5)", "Source 5", show=False),
+        Binding("6", "select_source(6)", "Source 6", show=False),
+        Binding("7", "select_source(7)", "Source 7", show=False),
+        Binding("8", "select_source(8)", "Source 8", show=False),
+        Binding("9", "select_source(9)", "Source 9", show=False),
+    ]
+    CSS = """
+    Screen {
+        background: #20242c;
+        color: #d7d4ca;
+    }
+
+    #sources {
+        height: 1;
+        padding: 0 1;
+        color: #d8a24c;
+    }
+
+    #search {
+        height: 3;
+        margin: 0 1;
+    }
+
+    #body {
+        height: 1fr;
+    }
+
+    #categories {
+        width: 32;
+        margin: 0 0 0 1;
+        border: solid #7a808b;
+    }
+
+    #right {
+        width: 1fr;
+        margin: 0 1 0 1;
+    }
+
+    #results {
+        height: 1fr;
+        border: solid #7a808b;
+    }
+
+    #preview {
+        height: 10;
+        border: solid #7a808b;
+        padding: 0 1 1 1;
+        color: #d7d4ca;
+    }
+
+    #commands {
+        height: 1;
+        padding: 0 1;
+        color: #9ba3b1;
+    }
+
+    ListView > ListItem.--highlight {
+        background: #3a3d45;
+        color: #d8a24c;
+    }
+    """
+
+    def __init__(self, *, config_path: str | Path | None = None, db_path: str | Path | None = None) -> None:
+        super().__init__()
+        self.config_path = Path(config_path).expanduser() if config_path else None
+        self.db_path = Path(db_path).expanduser() if db_path else configured_db_path(config_path)
+        self.sources: list[SourceSummary] = []
+        self.configured_sources: list[SourceConfig] = []
+        self.results: list[SearchResult] = []
+        self.selected_source_key: str | None = None
+        self.selected_category_key: str | None = None
+        self.query_text = ""
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        yield Static(Text("Sources: none indexed"), id="sources")
+        yield Input(placeholder="Search", id="search")
+        with Horizontal(id="body"):
+            yield ListView(id="categories")
+            with Vertical(id="right"):
+                yield ListView(id="results")
+                yield Static(Text("No result selected"), id="preview")
+        yield Static(Text("Open: Enter | Search: / | Clear Search: c | Refresh: r | Quit: q"), id="commands")
+
+    async def on_mount(self) -> None:
+        self.configured_sources = load_sources(self.config_path)
+        await self.reload_from_db()
+        self.query_one("#results", ListView).focus()
+
+    async def reload_from_db(self) -> None:
+        with Index(self.db_path) as index:
+            self.sources = index.sources()
+        if self.sources and self.selected_source_key not in {source.key for source in self.sources}:
+            self.selected_source_key = self.sources[0].key
+        if not self.sources:
+            self.selected_source_key = None
+        self.update_sources_row()
+        await self.refresh_categories()
+
+    async def refresh_categories(self) -> None:
+        with Index(self.db_path) as index:
+            categories = index.categories(source_key=self.selected_source_key)
+        category_list = self.query_one("#categories", ListView)
+        await category_list.clear()
+        await category_list.extend([CategoryItem(None), *[CategoryItem(category) for category in categories]])
+        category_list.index = 0
+        self.selected_category_key = None
+        await self.refresh_results()
+
+    async def refresh_results(self) -> None:
+        with Index(self.db_path) as index:
+            self.results = index.search(
+                self.query_text,
+                limit=200,
+                source_key=self.selected_source_key,
+                category=self.selected_category_key,
+            )
+        result_list = self.query_one("#results", ListView)
+        await result_list.clear()
+        await result_list.extend([ResultItem(result) for result in self.results])
+        result_list.index = 0 if self.results else None
+        self.update_preview(self.results[0] if self.results else None)
+
+    def update_sources_row(self) -> None:
+        sources = self.query_one("#sources", Static)
+        if not self.sources:
+            sources.update(Text("Sources: none indexed"))
+            return
+        parts = []
+        for index, source in enumerate(self.sources[:9], start=1):
+            marker = "*" if source.key == self.selected_source_key else " "
+            parts.append(f"[{index}]{marker} {source.name} ({source.count})")
+        sources.update(Text("Sources: " + " | ".join(parts)))
+
+    def update_preview(self, result: SearchResult | None) -> None:
+        preview = self.query_one("#preview", Static)
+        if result is None:
+            preview.update(Text("No result selected"))
+            return
+        metadata = " | ".join(
+            part
+            for part in [
+                result.source_key,
+                result.category or "Uncategorised",
+                result.content_type,
+                result.modified_at,
+            ]
+            if part
+        )
+        lines = [
+            result.title,
+            metadata,
+            f"Owner: {result.owner}" if result.owner else "",
+            f"Path: {result.path}",
+            f"URL: {result.url}",
+            "",
+            result.snippet or "(no preview text available)",
+        ]
+        preview.update(Text("\n".join(lines)))
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "search":
+            return
+        self.query_text = event.value.strip()
+        await self.refresh_results()
+        self.query_one("#results", ListView).focus()
+
+    async def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.list_view.id == "categories" and isinstance(event.item, CategoryItem):
+            self.selected_category_key = event.item.category_key
+            await self.refresh_results()
+        elif event.list_view.id == "results" and isinstance(event.item, ResultItem):
+            self.update_preview(event.item.result)
+
+    def action_focus_search(self) -> None:
+        self.query_one("#search", Input).focus()
+
+    async def action_clear_search(self) -> None:
+        self.query_text = ""
+        search = self.query_one("#search", Input)
+        search.value = ""
+        await self.refresh_results()
+        self.query_one("#results", ListView).focus()
+
+    async def action_refresh_index(self) -> None:
+        indexed = 0
+        skipped = 0
+        with Index(self.db_path) as index:
+            for source in self.configured_sources:
+                if source.type != "local":
+                    skipped += 1
+                    continue
+                index.upsert_source(source)
+                indexed += index.upsert_items(iter_local_items(source))
+        await self.reload_from_db()
+        self.notify(f"Indexed {indexed} local items" + (f"; skipped {skipped} non-local sources" if skipped else ""))
+
+    def action_open_selected(self) -> None:
+        result = self.selected_result()
+        if result is None:
+            self.notify("No result selected", severity="warning")
+            return
+        webbrowser.open(result.url)
+        self.notify(f"Opened {result.title}")
+
+    async def action_select_source(self, number: int) -> None:
+        index = number - 1
+        if index < 0 or index >= len(self.sources):
+            return
+        self.selected_source_key = self.sources[index].key
+        self.selected_category_key = None
+        self.update_sources_row()
+        await self.refresh_categories()
+
+    def selected_result(self) -> SearchResult | None:
+        result_list = self.query_one("#results", ListView)
+        item = result_list.highlighted_child
+        if isinstance(item, ResultItem):
+            return item.result
+        return self.results[0] if self.results else None
+
+
+def run_tui(config_path: str | Path | None = None, db_path: str | Path | None = None) -> int:
+    LazylensApp(config_path=config_path, db_path=db_path).run()
+    return 0

@@ -23,8 +23,8 @@ Jira links, Teams files, and richer context previews.
 ## Status
 
 Phase 1 skeleton has started. The first implementation slice supports local
-folder indexing into SQLite/FTS and command-line search. Confluence, SharePoint,
-and the Textual TUI are planned next.
+folder indexing into SQLite/FTS, command-line search, and an early Textual TUI.
+Confluence and SharePoint connectors are planned next.
 
 See [docs/plan.md](docs/plan.md).
 
@@ -47,7 +47,16 @@ Then run:
 lazylens doctor
 lazylens index
 lazylens search architecture
+lazylens
 ```
 
-`Enter` in the future TUI will open the canonical source URL in the browser.
-For local folders, that URL defaults to the local file URI.
+The TUI currently supports the local index demo flow:
+
+- `1`-`9`: switch source
+- `/`: focus search
+- `c`: clear search
+- `r`: refresh configured local sources
+- `Enter`: open the highlighted result URL in the browser
+- `q`: quit
+
+For local folders, the canonical URL defaults to the local file URI.

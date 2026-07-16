@@ -14,6 +14,21 @@ class SourceConfig:
 
 
 @dataclass(frozen=True)
+class SourceSummary:
+    key: str
+    name: str
+    type: str
+    count: int
+
+
+@dataclass(frozen=True)
+class CategorySummary:
+    key: str
+    name: str
+    count: int
+
+
+@dataclass(frozen=True)
 class IndexedItem:
     source_key: str
     item_key: str

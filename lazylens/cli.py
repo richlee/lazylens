@@ -64,6 +64,13 @@ def command_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_tui(args: argparse.Namespace) -> int:
+    from lazylens.tui import run_tui
+
+    db_path = configured_db_path(args.config) if args.db is None else Path(args.db).expanduser()
+    return run_tui(config_path=args.config, db_path=db_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="A fast TUI lens over work knowledge.")
     parser.add_argument("--config", help="Path to config.toml. Defaults to LAZYLENS_CONFIG or the platform config path.")
@@ -82,6 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser("doctor", help="Check config and local index state.")
     doctor_parser.set_defaults(func=command_doctor)
 
+    tui_parser = subparsers.add_parser("tui", help="Open the terminal UI.")
+    tui_parser.set_defaults(func=command_tui)
+
     return parser
 
 
@@ -89,8 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
-        parser.print_help()
-        return 0
+        return command_tui(args)
     return int(args.func(args))
 
 

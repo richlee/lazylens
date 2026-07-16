@@ -94,12 +94,12 @@ root = "~/Documents/notes"
 [sources."work-confluence"]
 name = "Work Confluence"
 type = "confluence"
-base_url = "https://example.atlassian.net"
+base_url = "https://example.atlassian.net/wiki"
 email = "you@example.com"
 api_token_env = "ATLASSIAN_API_TOKEN"
 space_keys = ["ARCH"]
 page_limit = 100
-max_results = 500
+max_pages = 5
 ```
 
 Then:
@@ -111,13 +111,12 @@ lazylens index work-confluence
 lazylens
 ```
 
-For Confluence, `space_keys` is usually the friendliest scope to configure. The
-connector uses Confluence CQL search through `/wiki/rest/api/content/search`,
-matching the approach used by `assurance-cli`. `page_limit` controls API page
-size, and `max_results` limits how much is fetched during this early connector
-phase.
+For Confluence, `space_keys` is usually the friendliest scope to configure.
+`page_limit` controls API page size, and `max_pages` limits how much is fetched
+per space during this early connector phase.
 
 References:
 
-- [Confluence Cloud REST API content search](https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content/#api-wiki-rest-api-content-search-get)
+- [Confluence Cloud REST API v2 pages](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-page/)
+- [Confluence Cloud REST API v2 spaces](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/)
 - [Atlassian basic auth for REST APIs](https://developer.atlassian.com/cloud/confluence/basic-auth-for-rest-apis/)

@@ -26,8 +26,6 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "certifi>=2024.2.2",
-  "httpx>=0.27",
   "textual>=0.86",
 ]
 
@@ -51,3 +49,4 @@ version = { file = "VERSION" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+

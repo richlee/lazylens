@@ -8,4 +8,5 @@ build/
 .pytest_cache/
 .ruff_cache/
 reports/
-
+*.sqlite3
+*.sqlite3-*

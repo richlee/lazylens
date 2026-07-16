@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lazylens"
+dynamic = ["version"]
+description = "A fast TUI lens over work knowledge"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Rich Lee", email = "richalee@pm.me" }
+]
+keywords = ["confluence", "sharepoint", "documents", "search", "tui", "textual"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "textual>=0.86",
+]
+
+[project.urls]
+Homepage = "https://github.com/richlee/lazylens"
+Repository = "https://github.com/richlee/lazylens"
+Issues = "https://github.com/richlee/lazylens/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "build>=1.5", "twine>=6.2"]
+
+[project.scripts]
+lazylens = "lazylens.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lazylens*"]
+namespaces = false
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

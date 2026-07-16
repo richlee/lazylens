@@ -13,6 +13,7 @@ from lazylens.config import configured_db_path, load_sources
 from lazylens.db import Index
 from lazylens.indexers.local import iter_local_items
 from lazylens.models import CategorySummary, SearchResult, SourceConfig, SourceSummary
+from lazylens.paths import default_config_path
 
 
 class CategoryItem(ListItem):
@@ -27,6 +28,11 @@ class ResultItem(ListItem):
     def __init__(self, result: SearchResult) -> None:
         self.result = result
         super().__init__(Label(result.title, markup=False))
+
+
+class MessageItem(ListItem):
+    def __init__(self, message: str) -> None:
+        super().__init__(Label(message, markup=False), disabled=True)
 
 
 class LazylensApp(App[None]):
@@ -107,6 +113,7 @@ class LazylensApp(App[None]):
         super().__init__()
         self.config_path = Path(config_path).expanduser() if config_path else None
         self.db_path = Path(db_path).expanduser() if db_path else configured_db_path(config_path)
+        self.display_config_path = Path(config_path).expanduser() if config_path else default_config_path()
         self.sources: list[SourceSummary] = []
         self.configured_sources: list[SourceConfig] = []
         self.results: list[SearchResult] = []
@@ -145,6 +152,12 @@ class LazylensApp(App[None]):
             categories = index.categories(source_key=self.selected_source_key)
         category_list = self.query_one("#categories", ListView)
         await category_list.clear()
+        if not self.sources:
+            await category_list.append(MessageItem("No indexed sources"))
+            category_list.index = None
+            self.selected_category_key = None
+            await self.refresh_results()
+            return
         await category_list.extend([CategoryItem(None), *[CategoryItem(category) for category in categories]])
         category_list.index = 0
         self.selected_category_key = None
@@ -160,14 +173,20 @@ class LazylensApp(App[None]):
             )
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
-        await result_list.extend([ResultItem(result) for result in self.results])
-        result_list.index = 0 if self.results else None
-        self.update_preview(self.results[0] if self.results else None)
+        if self.results:
+            await result_list.extend([ResultItem(result) for result in self.results])
+            result_list.index = 0
+            self.update_preview(self.results[0])
+            return
+        await result_list.append(MessageItem(self.empty_results_message()))
+        result_list.index = None
+        self.update_preview(None)
 
     def update_sources_row(self) -> None:
         sources = self.query_one("#sources", Static)
         if not self.sources:
-            sources.update(Text("Sources: none indexed"))
+            label = "no sources configured" if not self.configured_sources else "no indexed sources"
+            sources.update(Text(f"Sources: {label}"))
             return
         parts = []
         for index, source in enumerate(self.sources[:9], start=1):
@@ -178,7 +197,7 @@ class LazylensApp(App[None]):
     def update_preview(self, result: SearchResult | None) -> None:
         preview = self.query_one("#preview", Static)
         if result is None:
-            preview.update(Text("No result selected"))
+            preview.update(Text(self.empty_preview_text()))
             return
         metadata = " | ".join(
             part
@@ -261,6 +280,38 @@ class LazylensApp(App[None]):
         if isinstance(item, ResultItem):
             return item.result
         return self.results[0] if self.results else None
+
+    def empty_results_message(self) -> str:
+        if not self.configured_sources:
+            return "No sources configured"
+        if not self.sources:
+            return "No indexed sources"
+        if self.query_text:
+            return "No search results"
+        return "No results in this category"
+
+    def empty_preview_text(self) -> str:
+        if not self.configured_sources:
+            return "\n".join(
+                [
+                    "No sources configured.",
+                    "",
+                    f"Config: {self.display_config_path}",
+                    "",
+                    "Run `lazylens demo` for sample data, or `lazylens init --root <folder>`.",
+                ]
+            )
+        if not self.sources:
+            return "\n".join(
+                [
+                    "Sources are configured, but nothing has been indexed yet.",
+                    "",
+                    "Run `lazylens index`, or press `r` to refresh local sources.",
+                ]
+            )
+        if self.query_text:
+            return f"No results for: {self.query_text}"
+        return "No result selected."
 
 
 def run_tui(config_path: str | Path | None = None, db_path: str | Path | None = None) -> int:

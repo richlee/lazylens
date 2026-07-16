@@ -30,7 +30,23 @@ See [docs/plan.md](docs/plan.md).
 
 ## Local Folder Smoke Test
 
-Create a config:
+The quickest demo path creates a small local source, writes config, indexes it,
+and leaves the TUI ready to run:
+
+```sh
+lazylens demo
+lazylens
+```
+
+For your own local folder, create a starter config:
+
+```sh
+lazylens init --root ~/Documents/notes --name Notes --key notes
+lazylens index
+lazylens
+```
+
+The generated config is a small TOML file:
 
 ```toml
 database = "~/.local/share/lazylens/index.sqlite3"
@@ -41,7 +57,7 @@ type = "local"
 root = "~/Documents/notes"
 ```
 
-Then run:
+Useful commands:
 
 ```sh
 lazylens doctor

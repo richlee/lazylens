@@ -1,25 +1,50 @@
 from __future__ import annotations
 
-import base64
-import json
 import os
-from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
+import ssl
 from html.parser import HTMLParser
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
-from urllib.request import Request, urlopen
+from urllib.parse import urljoin
+
+import certifi
+import httpx
 
 from lazylens.extract import compact_text
 from lazylens.models import IndexedItem, SourceConfig
 
 
-JsonFetcher = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
-
-
 class ConfluenceError(RuntimeError):
     pass
+
+
+class AtlassianClient:
+    def __init__(self, *, base_url: str, email: str, api_token: str, timeout: float = 30.0) -> None:
+        self.base_url = normalise_base_url(base_url)
+        ssl_context = ssl.create_default_context(cafile=os.getenv("LAZYLENS_CA_BUNDLE") or certifi.where())
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            auth=(email, api_token),
+            timeout=timeout,
+            headers={"Accept": "application/json"},
+            verify=ssl_context,
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            response = self._client.get(path, params={key: value for key, value in (params or {}).items() if value})
+        except httpx.RequestError as exc:
+            raise ConfluenceError(f"Atlassian request failed before receiving a response: {exc}") from exc
+        if response.status_code in {401, 403}:
+            raise ConfluenceError(
+                f"Atlassian request failed: {response.status_code} {response.reason_phrase}. "
+                "Check ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN and confirm access."
+            )
+        if response.status_code >= 400:
+            raise ConfluenceError(f"Atlassian request failed: {response.status_code} {response.reason_phrase}.")
+        return response.json()
 
 
 class TextExtractor(HTMLParser):
@@ -36,89 +61,70 @@ class TextExtractor(HTMLParser):
         return compact_text(" ".join(self.parts))
 
 
-def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | None = None) -> list[IndexedItem]:
-    base_url = required_setting(source, "base_url").rstrip("/")
-    email = required_setting(source, "email")
+def iter_confluence_items(source: SourceConfig, *, client: AtlassianClient | None = None) -> list[IndexedItem]:
+    base_url = required_setting(source, "base_url")
+    email = str(source.settings.get("email") or os.environ.get("ATLASSIAN_EMAIL") or "")
+    if not email:
+        raise ConfluenceError(f"{source.key}: missing email or ATLASSIAN_EMAIL")
     api_token_env = str(source.settings.get("api_token_env", "ATLASSIAN_API_TOKEN"))
     api_token = os.environ.get(api_token_env)
     if not api_token:
         raise ConfluenceError(f"{source.key}: set {api_token_env} with a Confluence API token")
 
-    headers = auth_headers(email, api_token)
-    fetcher = fetch_json or fetch_confluence_json
-    spaces = resolve_spaces(source, base_url, headers, fetcher)
-    items: list[IndexedItem] = []
-    for space in spaces:
-        items.extend(iter_space_pages(source, base_url, headers, fetcher, space))
-    return items
+    own_client = client is None
+    atlassian = client or AtlassianClient(base_url=base_url, email=email, api_token=api_token)
+    try:
+        return [
+            confluence_page_to_item(source, atlassian.base_url, page)
+            for page in iter_confluence_pages(source, atlassian)
+        ]
+    finally:
+        if own_client:
+            atlassian.close()
 
 
-def resolve_spaces(
-    source: SourceConfig,
-    base_url: str,
-    headers: dict[str, str],
-    fetch_json: JsonFetcher,
-) -> list[dict[str, str]]:
-    space_ids = string_list(source.settings.get("space_ids"))
-    space_keys = string_list(source.settings.get("space_keys"))
-    if space_ids:
-        return [{"id": space_id, "key": space_id, "name": space_id} for space_id in space_ids]
-    if not space_keys:
-        raise ConfluenceError(f"{source.key}: configure space_keys or space_ids")
-
-    payload = fetch_json(
-        base_url,
-        {"path": "/api/v2/spaces", "params": {"keys": space_keys, "limit": 250}},
-        headers,
-    )
-    spaces = []
-    for result in payload.get("results", []):
-        if not isinstance(result, dict):
-            continue
-        spaces.append(
-            {
-                "id": str(result.get("id", "")),
-                "key": str(result.get("key", "")),
-                "name": str(result.get("name", result.get("key", ""))),
-            }
-        )
-    missing = sorted(set(space_keys) - {space["key"] for space in spaces})
-    if missing:
-        raise ConfluenceError(f"{source.key}: space key(s) not found: {', '.join(missing)}")
-    return spaces
+def iter_confluence_pages(source: SourceConfig, client: AtlassianClient) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    page_size = int(source.settings.get("page_limit", 25))
+    max_results = int(source.settings.get("max_results", source.settings.get("page_limit", 100)))
+    expand = str(source.settings.get("expand", "body.storage,space,version,history"))
+    for cql in confluence_cql_queries(source):
+        start = 0
+        while len(results) < max_results:
+            batch_limit = min(page_size, max_results - len(results))
+            payload = client.get(
+                "/wiki/rest/api/content/search",
+                params={"cql": cql, "limit": batch_limit, "start": start, "expand": expand},
+            )
+            batch = [item for item in payload.get("results", []) if isinstance(item, dict)]
+            results.extend(batch)
+            if len(batch) < batch_limit:
+                break
+            start += len(batch)
+    return results[:max_results]
 
 
-def iter_space_pages(
-    source: SourceConfig,
-    base_url: str,
-    headers: dict[str, str],
-    fetch_json: JsonFetcher,
-    space: dict[str, str],
-) -> Iterable[IndexedItem]:
-    limit = int(source.settings.get("page_limit", 100))
-    max_pages = int(source.settings.get("max_pages", 5))
-    path = "/api/v2/pages"
-    params: dict[str, Any] = {"space-id": [space["id"]], "body-format": "storage", "limit": limit}
-    fetched_pages = 0
-
-    while path and fetched_pages < max_pages:
-        payload = fetch_json(base_url, {"path": path, "params": params}, headers)
-        fetched_pages += 1
-        for page in payload.get("results", []):
-            if isinstance(page, dict):
-                yield confluence_page_to_item(source, base_url, page, space)
-
-        next_path = payload.get("_links", {}).get("next") if isinstance(payload.get("_links"), dict) else None
-        path = str(next_path) if next_path else ""
-        params = {}
+def confluence_cql_queries(source: SourceConfig) -> list[str]:
+    if source.settings.get("cql"):
+        return [str(source.settings["cql"])]
+    content_type = str(source.settings.get("content_type", "page"))
+    queries = string_list(source.settings.get("space_keys"))
+    if not queries:
+        raise ConfluenceError(f"{source.key}: configure cql or space_keys")
+    return [build_cql(space=space, content_type=content_type) for space in queries]
 
 
-def confluence_page_to_item(
-    source: SourceConfig,
-    base_url: str,
-    page: dict[str, Any],
-    space: dict[str, str],
-) -> IndexedItem:
+def build_cql(*, space: str, content_type: str) -> str:
+    return f"space = {quote_cql_value(space)} AND type = {content_type} ORDER BY lastmodified DESC"
+
+
+def quote_cql_value(value: str) -> str:
+    if value.replace("_", "").isalnum():
+        return value
+    return '"' + value.replace('"', r"\"") + '"'
+
+
+def confluence_page_to_item(source: SourceConfig, base_url: str, page: dict[str, Any]) -> IndexedItem:
     page_id = str(page.get("id", ""))
     title = str(page.get("title", page_id or "Untitled"))
     links = page.get("_links", {}) if isinstance(page.get("_links"), dict) else {}
@@ -127,53 +133,39 @@ def confluence_page_to_item(
     storage = page.get("body", {}).get("storage", {}) if isinstance(page.get("body"), dict) else {}
     storage_value = str(storage.get("value", "")) if isinstance(storage, dict) else ""
     text = html_to_text(storage_value)
+    space = page.get("space", {}) if isinstance(page.get("space"), dict) else {}
     version = page.get("version", {}) if isinstance(page.get("version"), dict) else {}
-    modified_at = str(version.get("createdAt") or page.get("createdAt") or datetime.now(timezone.utc).isoformat())
-    category = space.get("key") or space.get("name") or "Confluence"
+    history = page.get("history", {}) if isinstance(page.get("history"), dict) else {}
+    owner = version_user(version) or history_user(history)
+    category = str(space.get("key") or "Confluence")
+    container = str(space.get("name") or category)
     return IndexedItem(
         source_key=source.key,
         item_key=page_id,
         title=title,
         url=url,
-        path=f"{space.get('key') or space.get('id')}/{title}",
+        path=f"{category}/{title}",
         content_type="text/html",
-        modified_at=modified_at,
-        owner=str(page.get("ownerId") or page.get("authorId") or ""),
+        modified_at=str(version.get("when") or page.get("createdAt") or ""),
+        owner=owner,
         category=category,
-        container=space.get("name", category),
+        container=container,
         snippet=text[:500],
     )
 
 
-def fetch_confluence_json(base_url: str, request: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
-    path = str(request["path"])
-    params = request.get("params") or {}
-    query = urlencode(params, doseq=True)
-    url = api_url(base_url, path)
-    if query:
-        url = f"{url}?{query}"
-    http_request = Request(url, headers=headers)
-    try:
-        with urlopen(http_request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        raise ConfluenceError(f"Confluence returned HTTP {exc.code} for {url}") from exc
-    except URLError as exc:
-        raise ConfluenceError(f"Confluence request failed for {url}: {exc.reason}") from exc
+def version_user(version: dict[str, Any]) -> str:
+    by = version.get("by")
+    if isinstance(by, dict):
+        return str(by.get("displayName") or by.get("accountId") or "")
+    return ""
 
 
-def auth_headers(email: str, api_token: str) -> dict[str, str]:
-    token = base64.b64encode(f"{email}:{api_token}".encode("utf-8")).decode("ascii")
-    return {
-        "Accept": "application/json",
-        "Authorization": f"Basic {token}",
-    }
-
-
-def api_url(base_url: str, path: str) -> str:
-    if base_url.rstrip("/").endswith("/wiki") and path.startswith("/wiki/"):
-        path = path.removeprefix("/wiki")
-    return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+def history_user(history: dict[str, Any]) -> str:
+    by = history.get("createdBy")
+    if isinstance(by, dict):
+        return str(by.get("displayName") or by.get("accountId") or "")
+    return ""
 
 
 def html_to_text(value: str) -> str:
@@ -183,10 +175,15 @@ def html_to_text(value: str) -> str:
 
 
 def required_setting(source: SourceConfig, name: str) -> str:
-    value = source.settings.get(name)
+    value = source.settings.get(name) or (os.environ.get("ATLASSIAN_BASE_URL") if name == "base_url" else None)
     if not value:
         raise ConfluenceError(f"{source.key}: missing {name}")
     return str(value)
+
+
+def normalise_base_url(value: str) -> str:
+    url = value.rstrip("/")
+    return url.removesuffix("/wiki")
 
 
 def string_list(value: object) -> list[str]:

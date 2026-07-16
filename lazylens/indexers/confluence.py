@@ -37,9 +37,9 @@ class TextExtractor(HTMLParser):
 
 
 def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | None = None) -> list[IndexedItem]:
-    base_url = required_setting(source, "base_url").rstrip("/")
-    email = required_setting(source, "email")
-    api_token_env = str(source.settings.get("api_token_env", "ATLASSIAN_API_TOKEN"))
+    base_url = confluence_base_url(confluence_setting(source, "base_url", "CONFLUENCE_BASE_URL"))
+    email = confluence_setting(source, "email", "CONFLUENCE_EMAIL")
+    api_token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
     api_token = os.environ.get(api_token_env)
     if not api_token:
         raise ConfluenceError(f"{source.key}: set {api_token_env} with a Confluence API token")
@@ -176,16 +176,21 @@ def api_url(base_url: str, path: str) -> str:
     return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
 
 
+def confluence_base_url(value: str) -> str:
+    url = value.rstrip("/")
+    return url if url.endswith("/wiki") else f"{url}/wiki"
+
+
 def html_to_text(value: str) -> str:
     parser = TextExtractor()
     parser.feed(value)
     return parser.text()
 
 
-def required_setting(source: SourceConfig, name: str) -> str:
-    value = source.settings.get(name)
+def confluence_setting(source: SourceConfig, name: str, env_name: str) -> str:
+    value = source.settings.get(name) or os.environ.get(env_name)
     if not value:
-        raise ConfluenceError(f"{source.key}: missing {name}")
+        raise ConfluenceError(f"{source.key}: missing {name} or {env_name}")
     return str(value)
 
 

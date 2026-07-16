@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from lazylens.indexers.confluence import ConfluenceError, html_to_text, iter_confluence_items
+from lazylens.indexers.confluence import ConfluenceError, confluence_base_url, html_to_text, iter_confluence_items
 from lazylens.models import SourceConfig
 
 
@@ -14,13 +14,12 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
         name="Work Confluence",
         type="confluence",
         settings={
-            "base_url": "https://example.atlassian.net/wiki",
-            "email": "rich@example.com",
-            "api_token_env": "CONF_TOKEN",
             "space_keys": ["ARCH"],
         },
     )
-    monkeypatch.setenv("CONF_TOKEN", "secret")
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.atlassian.net/wiki")
+    monkeypatch.setenv("CONFLUENCE_EMAIL", "rich@example.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "secret")
     calls: list[dict[str, Any]] = []
 
     def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
@@ -57,7 +56,24 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
     assert items[0].snippet == "API Decision Use a managed gateway."
 
 
-def test_iter_confluence_items_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_iter_confluence_items_requires_default_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = SourceConfig(
+        key="work",
+        name="Work Confluence",
+        type="confluence",
+        settings={
+            "space_keys": ["ARCH"],
+        },
+    )
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.atlassian.net/wiki")
+    monkeypatch.setenv("CONFLUENCE_EMAIL", "rich@example.com")
+    monkeypatch.delenv("CONFLUENCE_API_TOKEN", raising=False)
+
+    with pytest.raises(ConfluenceError, match="CONFLUENCE_API_TOKEN"):
+        iter_confluence_items(source, fetch_json=lambda *_args: {})
+
+
+def test_iter_confluence_items_supports_custom_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
     source = SourceConfig(
         key="work",
         name="Work Confluence",
@@ -65,15 +81,23 @@ def test_iter_confluence_items_requires_token(monkeypatch: pytest.MonkeyPatch) -
         settings={
             "base_url": "https://example.atlassian.net/wiki",
             "email": "rich@example.com",
-            "api_token_env": "CONF_TOKEN",
-            "space_keys": ["ARCH"],
+            "api_token_env": "CUSTOM_CONFLUENCE_TOKEN",
+            "space_ids": ["123"],
         },
     )
-    monkeypatch.delenv("CONF_TOKEN", raising=False)
+    monkeypatch.setenv("CUSTOM_CONFLUENCE_TOKEN", "secret")
 
-    with pytest.raises(ConfluenceError, match="CONF_TOKEN"):
-        iter_confluence_items(source, fetch_json=lambda *_args: {})
+    def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
+        assert request["path"] == "/api/v2/pages"
+        return {"results": []}
+
+    assert iter_confluence_items(source, fetch_json=fetch_json) == []
 
 
 def test_html_to_text_compacts_storage_html() -> None:
     assert html_to_text("<h1>Title</h1><p> Useful <strong>context</strong>.</p>") == "Title Useful context ."
+
+
+def test_confluence_base_url_accepts_site_root_or_wiki_url() -> None:
+    assert confluence_base_url("https://example.atlassian.net") == "https://example.atlassian.net/wiki"
+    assert confluence_base_url("https://example.atlassian.net/wiki") == "https://example.atlassian.net/wiki"

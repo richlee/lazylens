@@ -175,9 +175,11 @@ def command_doctor(args: argparse.Namespace) -> int:
         if source.type == "local":
             status = "OK" if source.root and source.root.exists() else "missing"
         elif source.type == "confluence":
-            token_env = str(source.settings.get("api_token_env", "ATLASSIAN_API_TOKEN"))
+            token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
             token_status = "set" if os.environ.get(token_env) else "missing"
-            status = "OK" if source.settings.get("base_url") and source.settings.get("email") else "missing config"
+            base_url = source.settings.get("base_url") or os.environ.get("CONFLUENCE_BASE_URL")
+            email = source.settings.get("email") or os.environ.get("CONFLUENCE_EMAIL")
+            status = "OK" if base_url and email else "missing config/env"
             status = f"{status}; token env: {token_env} ({token_status})"
         else:
             status = "unsupported"

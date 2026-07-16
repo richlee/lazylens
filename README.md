@@ -80,8 +80,9 @@ For local folders, the canonical URL defaults to the local file URI.
 ## Source Config
 
 `lazylens` currently supports local folders and an early Confluence Cloud page
-indexer. Confluence indexing uses Atlassian API-token basic auth, but the token
-should stay in an environment variable rather than the config file.
+indexer. Confluence indexing uses API-token basic auth through environment
+variables. Search in the TUI remains local SQLite/FTS only; the Confluence API is
+used to refresh the local index.
 
 ```toml
 database = "~/.local/share/lazylens/index.sqlite3"
@@ -94,9 +95,6 @@ root = "~/Documents/notes"
 [sources."work-confluence"]
 name = "Work Confluence"
 type = "confluence"
-base_url = "https://example.atlassian.net/wiki"
-email = "you@example.com"
-api_token_env = "ATLASSIAN_API_TOKEN"
 space_keys = ["ARCH"]
 page_limit = 100
 max_pages = 5
@@ -105,15 +103,22 @@ max_pages = 5
 Then:
 
 ```sh
-export ATLASSIAN_API_TOKEN="..."
+export CONFLUENCE_BASE_URL="https://example.atlassian.net"
+export CONFLUENCE_EMAIL="you@example.com"
+export CONFLUENCE_API_TOKEN="..."
 lazylens doctor
 lazylens index work-confluence
 lazylens
 ```
 
-For Confluence, `space_keys` is usually the friendliest scope to configure.
-`page_limit` controls API page size, and `max_pages` limits how much is fetched
-per space during this early connector phase.
+For Confluence, `space_keys` is usually the friendliest scope to configure. You
+can also configure `space_ids` if you already know them. `page_limit` controls
+API page size, and `max_pages` limits how much is fetched per space during this
+early connector phase.
+
+If needed, `base_url`, `email`, or `api_token_env` can be set on the source, but
+the token value itself should stay out of the TOML file. `CONFLUENCE_BASE_URL`
+may be either the Atlassian site root or the `/wiki` URL.
 
 References:
 

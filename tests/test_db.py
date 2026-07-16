@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from lazylens.db import Index
@@ -18,6 +19,8 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         content_type="text/markdown",
         modified_at="2026-07-16T12:00:00+00:00",
         owner="",
+        category="Architecture",
+        container="architecture",
         snippet="Useful context about SharePoint and Confluence indexing.",
     )
 
@@ -29,4 +32,53 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert len(results) == 1
     assert results[0].title == "Architecture Notes"
     assert results[0].source_key == "local"
+    assert results[0].category == "Architecture"
+    assert results[0].container == "architecture"
 
+
+def test_index_migrates_existing_database(tmp_path: Path) -> None:
+    db_path = tmp_path / "old.sqlite3"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        CREATE TABLE sources (
+            key TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            root TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE items (
+            id INTEGER PRIMARY KEY,
+            source_key TEXT NOT NULL REFERENCES sources(key) ON DELETE CASCADE,
+            item_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            path TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            modified_at TEXT NOT NULL,
+            owner TEXT NOT NULL DEFAULT '',
+            snippet TEXT NOT NULL DEFAULT '',
+            indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_key, item_key)
+        );
+        CREATE VIRTUAL TABLE item_fts USING fts5(
+            title,
+            snippet,
+            path,
+            item_id UNINDEXED
+        );
+        INSERT INTO sources (key, name, type) VALUES ('local', 'Local', 'local');
+        INSERT INTO items (
+            source_key, item_key, title, url, path, content_type, modified_at
+        )
+        VALUES ('local', 'notes.md', 'Notes', 'file:///notes.md', '/tmp/notes.md', 'text/markdown', '');
+        """
+    )
+    connection.close()
+
+    with Index(db_path) as index:
+        results = index.search("", limit=1)
+
+    assert results[0].category == ""
+    assert results[0].container == ""

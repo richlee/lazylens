@@ -41,16 +41,28 @@ TUI:
 
 - Source row at top.
 - Search-first main workflow.
-- Left pane for source containers or categories.
-- Main pane for ranked results.
+- Left pane for navigation views:
+  - Source Structure: Confluence spaces/page trees, SharePoint sites/libraries/folders, local folders.
+  - Intelligent Tags: generated categories based on title, metadata, path, and optionally preview text.
+  - Later: All, Recent, Stale, Owner, and Type views.
+- Main pane for ranked results, initially as a title list.
 - Persistent preview/details panel inside the right side of the layout.
 - Preview panel updates as the highlighted result changes.
 - Preview panel shows title, source, modified date, owner, path/URL, and context snippet.
+- Search result rows should be backed by title, preview text, and metadata, even where the first TUI only renders the title.
 - `Enter`: open the canonical source URL in the browser.
 - `/`: search.
 - `r`: refresh.
 - `d`: download/cache if supported.
 - `i` or right-arrow: details.
+
+Result model:
+
+- Title: concise display label from source metadata or extracted heading.
+- Preview: a useful 200-500 character chunk from the page/document, not full stored content by default.
+- Metadata: source, category, container/path, URL, owner/author, modified time, content type.
+- Category: initially source-derived from folders, spaces, sites, or page hierarchy.
+- Intelligent category: later generated from content and metadata, similar to the lazybooks taxonomy work.
 
 Indexing:
 

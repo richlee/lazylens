@@ -23,6 +23,8 @@ class IndexedItem:
     content_type: str
     modified_at: str
     owner: str
+    category: str
+    container: str
     snippet: str
 
 
@@ -36,6 +38,7 @@ class SearchResult:
     content_type: str
     modified_at: str
     owner: str
+    category: str
+    container: str
     snippet: str
     rank: float
-

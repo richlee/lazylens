@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from lazylens.extract import read_text_preview
 from lazylens.models import IndexedItem, SourceConfig
@@ -39,6 +39,8 @@ def iter_local_items(source: SourceConfig) -> list[IndexedItem]:
                 content_type=content_type,
                 modified_at=modified_at,
                 owner="",
+                category=local_category(relative),
+                container=local_container(relative),
                 snippet=snippet,
             )
         )
@@ -50,3 +52,14 @@ def local_url(source: SourceConfig, path: Path, relative: str) -> str:
         return source.url_prefix.rstrip("/") + "/" + relative
     return path.resolve().as_uri()
 
+
+def local_category(relative: str) -> str:
+    parts = PurePosixPath(relative).parts
+    if len(parts) < 2:
+        return "Uncategorised"
+    return parts[0].replace("-", " ").replace("_", " ").title()
+
+
+def local_container(relative: str) -> str:
+    parent = PurePosixPath(relative).parent.as_posix()
+    return "" if parent == "." else parent

@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS items (
     content_type TEXT NOT NULL,
     modified_at TEXT NOT NULL,
     owner TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    container TEXT NOT NULL DEFAULT '',
     snippet TEXT NOT NULL DEFAULT '',
     indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source_key, item_key)
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE VIRTUAL TABLE IF NOT EXISTS item_fts USING fts5(
     title,
     snippet,
+    category,
     path,
     item_id UNINDEXED
 );
@@ -50,6 +53,7 @@ class Index:
         self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
         self.connection.executescript(SCHEMA)
+        self._migrate()
 
     def close(self) -> None:
         self.connection.close()
@@ -80,9 +84,10 @@ class Index:
             cursor = self.connection.execute(
                 """
                 INSERT INTO items (
-                    source_key, item_key, title, url, path, content_type, modified_at, owner, snippet, indexed_at
+                    source_key, item_key, title, url, path, content_type, modified_at,
+                    owner, category, container, snippet, indexed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(source_key, item_key) DO UPDATE SET
                     title = excluded.title,
                     url = excluded.url,
@@ -90,6 +95,8 @@ class Index:
                     content_type = excluded.content_type,
                     modified_at = excluded.modified_at,
                     owner = excluded.owner,
+                    category = excluded.category,
+                    container = excluded.container,
                     snippet = excluded.snippet,
                     indexed_at = CURRENT_TIMESTAMP
                 RETURNING id
@@ -103,14 +110,16 @@ class Index:
                     item.content_type,
                     item.modified_at,
                     item.owner,
+                    item.category,
+                    item.container,
                     item.snippet,
                 ),
             )
             item_id = int(cursor.fetchone()["id"])
             self.connection.execute("DELETE FROM item_fts WHERE item_id = ?", (item_id,))
             self.connection.execute(
-                "INSERT INTO item_fts (title, snippet, path, item_id) VALUES (?, ?, ?, ?)",
-                (item.title, item.snippet, item.path, item_id),
+                "INSERT INTO item_fts (title, snippet, category, path, item_id) VALUES (?, ?, ?, ?, ?)",
+                (item.title, item.snippet, item.category, item.path, item_id),
             )
             count += 1
         self.connection.commit()
@@ -149,6 +158,8 @@ class Index:
                 content_type=str(row["content_type"]),
                 modified_at=str(row["modified_at"]),
                 owner=str(row["owner"]),
+                category=str(row["category"]),
+                container=str(row["container"]),
                 snippet=str(row["snippet"]),
                 rank=float(row["rank"]),
             )
@@ -159,3 +170,37 @@ class Index:
         row = self.connection.execute("SELECT COUNT(*) AS count FROM items").fetchone()
         return int(row["count"])
 
+    def _migrate(self) -> None:
+        columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(items)").fetchall()
+        }
+        if "category" not in columns:
+            self.connection.execute("ALTER TABLE items ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+        if "container" not in columns:
+            self.connection.execute("ALTER TABLE items ADD COLUMN container TEXT NOT NULL DEFAULT ''")
+
+        fts_columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(item_fts)").fetchall()
+        }
+        if "category" not in fts_columns:
+            self.connection.execute("DROP TABLE item_fts")
+            self.connection.execute(
+                """
+                CREATE VIRTUAL TABLE item_fts USING fts5(
+                    title,
+                    snippet,
+                    category,
+                    path,
+                    item_id UNINDEXED
+                )
+                """
+            )
+            self.connection.execute(
+                """
+                INSERT INTO item_fts (title, snippet, category, path, item_id)
+                SELECT title, snippet, category, path, id FROM items
+                """
+            )
+        self.connection.commit()

@@ -40,7 +40,8 @@ def command_search(args: argparse.Namespace) -> int:
     with Index(db_path) as index:
         results = index.search(args.query, limit=args.limit)
     for result in results:
-        print(f"{result.title} | {result.source_key} | {result.url}")
+        meta = " | ".join(part for part in [result.source_key, result.category, result.modified_at] if part)
+        print(f"{result.title} | {meta} | {result.url}")
         if result.snippet:
             print(f"  {result.snippet}")
     return 0
@@ -95,4 +96,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

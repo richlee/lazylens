@@ -89,16 +89,16 @@ Scope:
 Example config:
 
 ```toml
-[projects.nebula]
-name = "Nebula"
-confluence_spaces = ["NEB"]
-sharepoint_sites = ["SWX Nebula"]
+[projects.platform-modernisation]
+name = "Platform Modernisation"
+confluence_spaces = ["PLAT"]
+sharepoint_sites = ["Platform Modernisation"]
 sharepoint_paths = ["Shared Documents/Architecture", "Shared Documents/Delivery"]
 
-[projects.assurance]
-name = "Assurance"
-confluence_spaces = ["ASSURE"]
-sharepoint_sites = ["Assurance"]
+[projects.customer-portal]
+name = "Customer Portal"
+confluence_spaces = ["PORTAL"]
+sharepoint_sites = ["Customer Portal"]
 ```
 
 Suggested taxonomy:
@@ -141,4 +141,3 @@ Phase 2 success:
 - Make source connectors replaceable.
 - Keep indexing transparent and inspectable.
 - The TUI should stay fast even when connectors are slow.
-

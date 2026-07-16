@@ -43,8 +43,10 @@ TUI:
 - Search-first main workflow.
 - Left pane for source containers or categories.
 - Main pane for ranked results.
-- Details pane with title, source, modified date, owner, path/URL, and context snippet.
-- `Enter`: open URL or local cached file.
+- Persistent preview/details panel inside the right side of the layout.
+- Preview panel updates as the highlighted result changes.
+- Preview panel shows title, source, modified date, owner, path/URL, and context snippet.
+- `Enter`: open the canonical source URL in the browser.
 - `/`: search.
 - `r`: refresh.
 - `d`: download/cache if supported.
@@ -70,7 +72,7 @@ Phase 1 success:
 - Can connect to one Confluence instance and one SharePoint tenant.
 - Can index a small controlled scope.
 - Can search locally in under a second.
-- Can open the source item from the TUI.
+- Can open the source item in a browser from the TUI.
 - Can show enough context to know whether a result is worth opening.
 
 ## Phase 2: Project Intelligence Layer

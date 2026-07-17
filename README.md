@@ -1,63 +1,75 @@
 # lazylens
 
-A fast TUI lens over work knowledge.
+[![Tests](https://github.com/richlee/lazylens/actions/workflows/tests.yml/badge.svg)](https://github.com/richlee/lazylens/actions/workflows/tests.yml)
 
-`lazylens` is planned as a local index and terminal UI for finding work
-knowledge across Confluence, SharePoint, and local project folders. It is a
-separate product from `lazybooks`: the lessons carry across, but the domain,
-connectors, data model, and workflows are different.
+A fast terminal lens over work knowledge.
 
-## Product Direction
+`lazylens` builds a local SQLite/FTS index for project documents, then gives you
+a keyboard-first Textual TUI for search, structure navigation, previews, and
+document relationships. It currently supports local folders and Confluence
+Cloud. SharePoint is planned next.
 
-The first version should be a personal work index:
+It is useful when you want to explore work documents quickly without waiting on
+browser search, full sync clients, or heavyweight document UIs.
 
-- index metadata and useful snippets from configured sources
-- store the index locally in SQLite with FTS5
-- search and preview results quickly from a Textual TUI
-- open canonical source URLs
-- optionally download/cache files only when requested
+## Screenshot
 
-Later versions can add project grouping, classification, freshness signals,
-Jira links, Teams files, and richer context previews.
+![lazylens TUI showing sources, structure, page navigation, outgoing links, and incoming links](https://raw.githubusercontent.com/richlee/lazylens/main/docs/assets/lazylens-tui.jpg)
 
-## Status
+## Features
 
-Phase 1 skeleton has started. The first implementation slice supports local
-folder and Confluence Cloud indexing into SQLite/FTS, command-line search, and
-an early Textual TUI. SharePoint is planned next.
+- Local SQLite index with FTS5 search.
+- Local folder indexing for Markdown, text, and other readable project files.
+- Confluence Cloud indexing with page hierarchy, folders, snippets, and links.
+- TUI structure navigation: source, top-level pages, folders, and child pages.
+- Relationship navigation: outgoing and incoming document links remain global.
+- Browser/file opening from the selected page.
+- Optional Nerd Font icon mode for richer terminal presentation.
 
-See [docs/plan.md](docs/plan.md).
+## Install
 
-## Local Folder Smoke Test
+From PyPI, once published:
 
-The quickest demo path creates a small local source, writes config, indexes it,
-and leaves the TUI ready to run:
+```sh
+pipx install lazylens
+lazylens --help
+```
+
+From a checkout:
+
+```sh
+git clone https://github.com/richlee/lazylens.git
+cd lazylens
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/lazylens --help
+```
+
+On Windows PowerShell:
+
+```powershell
+git clone https://github.com/richlee/lazylens.git
+cd lazylens
+py -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[dev]"
+.\.venv\Scripts\lazylens --help
+```
+
+## Quick Start
+
+Create a local demo source and open the TUI:
 
 ```sh
 lazylens demo
 lazylens
 ```
 
-For your own local folder, create a starter config:
+For your own local folder:
 
 ```sh
 lazylens init --root ~/Documents/notes --name Notes --key notes
 lazylens index
 lazylens
-```
-
-The generated config is a small TOML file:
-
-```toml
-database = "~/.local/share/lazylens/index.sqlite3"
-
-[ui]
-icon_style = "ascii" # ascii, unicode, or nerd
-
-[sources.notes]
-name = "Notes"
-type = "local"
-root = "~/Documents/notes"
 ```
 
 Useful commands:
@@ -69,21 +81,94 @@ lazylens search architecture
 lazylens
 ```
 
-The TUI currently supports the local index demo flow:
+## Confluence Setup
+
+`lazylens` uses Atlassian API-token basic auth for Confluence Cloud. Search in
+the TUI remains local; the Confluence API is used only to refresh the SQLite
+index.
+
+Generate config and an env-file skeleton:
+
+```sh
+lazylens init confluence \
+  --base-url "https://example.atlassian.net" \
+  --email "you@example.com" \
+  --space-key ARCH
+```
+
+Edit the generated env file and paste an Atlassian API token:
+
+```sh
+${EDITOR:-vi} ~/.config/lazylens/atlassian.env
+source ~/.config/lazylens/atlassian.env
+lazylens doctor
+lazylens index personal-confluence
+lazylens
+```
+
+The token should stay in `~/.config/lazylens/atlassian.env` or your shell
+environment, not in `config.toml`.
+
+For personal or non-client testing, create a small Atlassian Cloud site, add a
+dedicated space, create an API token from your Atlassian account security
+settings, then run `lazylens doctor` before indexing.
+
+## Configuration
+
+Default config path:
+
+- macOS/Linux: `~/.config/lazylens/config.toml`
+- Windows: `%APPDATA%\lazylens\config.toml`
+
+Default database path:
+
+- macOS/Linux: `~/.local/share/lazylens/index.sqlite3`
+- Windows: `%LOCALAPPDATA%\lazylens\index.sqlite3`
+
+Example:
+
+```toml
+database = "~/.local/share/lazylens/index.sqlite3"
+
+[ui]
+icon_style = "ascii" # ascii, unicode, or nerd
+
+[sources."notes"]
+name = "Notes"
+type = "local"
+root = "~/Documents/notes"
+
+[sources."personal-confluence"]
+name = "Personal Confluence"
+type = "confluence"
+space_keys = ["ARCH"]
+page_limit = 100
+max_pages = 5
+```
+
+For Confluence, `space_keys` is usually the friendliest scope to configure. You
+can also configure `space_ids` if you already know them. `page_limit` controls
+API page size, and `max_pages` limits how many API result pages are fetched per
+space.
+
+If needed, `base_url`, `email`, or `api_token_env` can be set on a source. The
+token value itself should stay out of TOML. `CONFLUENCE_BASE_URL` may be either
+the Atlassian site root or the `/wiki` URL.
+
+## TUI Keys
 
 - `1`-`9`: switch source
 - `/`: focus search
 - `c`: clear search
-- `r`: refresh configured local sources
-- `Enter`: open the highlighted result URL in the browser
+- `r`: refresh configured sources
+- `Enter`: select structure, open pages, or drill into folders
+- `Right` / `Space`: drill into page/folder children or follow selected links
+- `Left` / `Backspace`: go back from a drilled view
 - `q`: quit
 
-For local folders, the canonical URL defaults to the local file URI.
+## Icons
 
-## UI Icons
-
-The TUI defaults to portable ASCII labels, so it works in plain terminals. Set
-`icon_style` if you want richer symbols:
+The TUI defaults to portable ASCII labels. For richer icons:
 
 ```toml
 [ui]
@@ -97,69 +182,20 @@ On macOS with Homebrew:
 brew install --cask font-fira-code-nerd-font
 ```
 
-## Source Config
-
-`lazylens` currently supports local folders and an early Confluence Cloud page
-indexer. Confluence indexing uses API-token basic auth through environment
-variables. Search in the TUI remains local SQLite/FTS only; the Confluence API is
-used to refresh the local index.
-
-```toml
-database = "~/.local/share/lazylens/index.sqlite3"
-
-[ui]
-icon_style = "ascii"
-
-[sources."notes"]
-name = "Notes"
-type = "local"
-root = "~/Documents/notes"
-
-[sources."work-confluence"]
-name = "Work Confluence"
-type = "confluence"
-space_keys = ["ARCH"]
-page_limit = 100
-max_pages = 5
-```
-
-Then:
+## Development
 
 ```sh
-lazylens init confluence \
-  --base-url "https://example.atlassian.net" \
-  --email "you@example.com" \
-  --space-key ARCH
-
-# Edit the generated env file and paste an Atlassian API token.
-${EDITOR:-vi} ~/.config/lazylens/atlassian.env
-
-source ~/.config/lazylens/atlassian.env
-lazylens doctor
-lazylens index personal-confluence
-lazylens
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pytest
 ```
 
-`lazylens init confluence` creates or appends the Confluence source in
-`config.toml`, then writes a separate `atlassian.env` skeleton for credentials.
-The API token should stay in the env file or your shell, not in `config.toml`.
+The project is intentionally local-first: remote APIs refresh the index, while
+interactive search/navigation reads from SQLite.
 
-For Confluence, `space_keys` is usually the friendliest scope to configure. You
-can also configure `space_ids` if you already know them. `page_limit` controls
-API page size, and `max_pages` limits how much is fetched per space during this
-early connector phase.
+See [docs/plan.md](docs/plan.md) for the broader direction.
 
-If needed, `base_url`, `email`, or `api_token_env` can be set on the source, but
-the token value itself should stay out of the TOML file. `CONFLUENCE_BASE_URL`
-may be either the Atlassian site root or the `/wiki` URL.
-
-For personal or non-client testing, create a small Atlassian Cloud site and a
-space dedicated to sample documents, then create an API token from your
-Atlassian account security settings. Put only the site URL, account email, and
-token in `~/.config/lazylens/atlassian.env`, run `source` in the shell that will
-launch lazylens, and use `lazylens doctor` before indexing.
-
-References:
+## References
 
 - [Confluence Cloud REST API v2 pages](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-page/)
 - [Confluence Cloud REST API v2 spaces](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/)

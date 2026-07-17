@@ -177,7 +177,8 @@ def iter_space_pages(
         path = str(next_path) if next_path else ""
         params = {}
 
-    hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")))
+    structure_nodes = confluence_structure_nodes(base_url, headers, fetch_json, pages)
+    hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")), structure_nodes)
     for page in pages:
         yield confluence_page_to_item(source, base_url, page, space, hierarchy)
 
@@ -221,11 +222,54 @@ def confluence_page_to_item(
     )
 
 
-def confluence_hierarchy(pages: list[dict[str, Any]], homepage_id: str) -> dict[str, dict[str, str]]:
-    page_by_id = {str(page.get("id", "")): page for page in pages}
+def confluence_structure_nodes(
+    base_url: str,
+    headers: dict[str, str],
+    fetch_json: JsonFetcher,
+    pages: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    nodes = {str(page.get("id", "")): page for page in pages if page.get("id")}
+    for page in pages:
+        page_id = str(page.get("id", ""))
+        if not page_id:
+            continue
+        for child in confluence_direct_children(base_url, headers, fetch_json, page_id):
+            child_id = str(child.get("id", ""))
+            if not child_id or child_id in nodes:
+                continue
+            if not child.get("parentId"):
+                child = {**child, "parentId": page_id}
+            nodes[child_id] = child
+    return nodes
+
+
+def confluence_direct_children(
+    base_url: str,
+    headers: dict[str, str],
+    fetch_json: JsonFetcher,
+    page_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        payload = fetch_json(
+            base_url,
+            {"path": f"/api/v2/pages/{page_id}/direct-children", "params": {"limit": 250}},
+            headers,
+        )
+    except ConfluenceError:
+        return []
+    return [child for child in payload.get("results", []) if isinstance(child, dict)]
+
+
+def confluence_hierarchy(
+    pages: list[dict[str, Any]],
+    homepage_id: str,
+    structure_nodes: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, str]]:
+    node_by_id = structure_nodes or {str(page.get("id", "")): page for page in pages}
     hierarchy = {}
-    for page_id, page in page_by_id.items():
-        top = top_level_page(page, page_by_id, homepage_id)
+    for page in pages:
+        page_id = str(page.get("id", ""))
+        top = top_level_node(page, node_by_id, homepage_id)
         hierarchy[page_id] = {
             "top_id": str(top.get("id", "")) if top else page_id,
             "top_title": str(top.get("title", "")) if top else str(page.get("title", "")),
@@ -233,9 +277,9 @@ def confluence_hierarchy(pages: list[dict[str, Any]], homepage_id: str) -> dict[
     return hierarchy
 
 
-def top_level_page(
+def top_level_node(
     page: dict[str, Any],
-    page_by_id: dict[str, dict[str, Any]],
+    node_by_id: dict[str, dict[str, Any]],
     homepage_id: str,
 ) -> dict[str, Any] | None:
     current = page
@@ -243,12 +287,12 @@ def top_level_page(
     while current:
         current_id = str(current.get("id", ""))
         parent_id = str(current.get("parentId") or "")
-        if not parent_id or parent_id == homepage_id or parent_id not in page_by_id:
+        if not parent_id or parent_id == homepage_id or parent_id not in node_by_id:
             return current
         if current_id in seen:
             return current
         seen.add(current_id)
-        current = page_by_id[parent_id]
+        current = node_by_id[parent_id]
     return None
 
 

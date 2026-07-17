@@ -72,6 +72,26 @@ def test_preview_text_formats_metadata_and_highlights_query() -> None:
     assert any(text.plain[span.start : span.end] == "Share" for span in text.spans)
 
 
+def test_tui_layout_prioritises_pages_column(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test(size=(120, 48)) as pilot:
+            await pilot.pause()
+
+            structure_width = app.query_one("#spaces").size.width
+            pages_width = app.query_one("#center").size.width
+            relations_width = app.query_one("#relations").size.width
+
+            assert pages_width > structure_width
+            assert pages_width > relations_width
+            assert structure_width >= 26
+            assert relations_width >= 36
+
+    asyncio.run(run_app())
+
+
 def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)

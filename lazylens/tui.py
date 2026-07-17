@@ -93,7 +93,9 @@ class LazylensApp(App[None]):
     }
 
     #spaces {
-        width: 32;
+        width: 1fr;
+        min-width: 26;
+        max-width: 36;
         margin: 0 0 0 1;
     }
 
@@ -103,12 +105,15 @@ class LazylensApp(App[None]):
     }
 
     #center {
-        width: 1fr;
+        width: 3fr;
+        min-width: 44;
         margin: 0 0 0 1;
     }
 
     #relations {
-        width: 42;
+        width: 1fr;
+        min-width: 36;
+        max-width: 50;
         margin: 0 1 0 1;
     }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -57,6 +58,8 @@ def iter_jira_refresh(
     headers = auth_headers(email, api_token)
     fetcher = fetch_json or fetch_jira_json
     jql = jira_jql(source)
+    description_fields = resolve_description_fields(source, base_url, headers, fetcher)
+    search_fields = deduplicate_links([*JIRA_FIELDS, *description_fields])
     max_results = int(source.settings.get("issue_limit", 100))
     max_pages = int(source.settings.get("max_pages", 10))
     next_page_token = ""
@@ -71,7 +74,7 @@ def iter_jira_refresh(
             "method": "POST",
             "body": {
                 "jql": jql,
-                "fields": JIRA_FIELDS,
+                "fields": search_fields,
                 "maxResults": max_results,
             },
         }
@@ -82,7 +85,7 @@ def iter_jira_refresh(
         for issue in payload.get("issues", []):
             if not isinstance(issue, dict):
                 continue
-            item = jira_issue_to_item(source, base_url, issue)
+            item = jira_issue_to_item(source, base_url, issue, description_fields=description_fields)
             seen_item_keys.add(item.item_key)
             existing = existing_items.get(item.item_key) if existing_items else None
             if existing and jira_metadata_matches(existing, item):
@@ -96,7 +99,13 @@ def iter_jira_refresh(
     return items, seen_item_keys, unchanged, False
 
 
-def jira_issue_to_item(source: SourceConfig, base_url: str, issue: dict[str, Any]) -> IndexedItem:
+def jira_issue_to_item(
+    source: SourceConfig,
+    base_url: str,
+    issue: dict[str, Any],
+    *,
+    description_fields: list[str] | None = None,
+) -> IndexedItem:
     fields = issue.get("fields", {}) if isinstance(issue.get("fields"), dict) else {}
     key = str(issue.get("key", ""))
     title = str(fields.get("summary") or key or "Untitled Jira issue")
@@ -105,16 +114,18 @@ def jira_issue_to_item(source: SourceConfig, base_url: str, issue: dict[str, Any
     status = fields.get("status", {}) if isinstance(fields.get("status"), dict) else {}
     assignee = fields.get("assignee", {}) if isinstance(fields.get("assignee"), dict) else {}
     parent = fields.get("parent", {}) if isinstance(fields.get("parent"), dict) else {}
-    description = adf_text(fields.get("description"))
+    description_value = first_field_value(fields, description_fields or ["description"])
+    description = adf_text(description_value)
     status_name = str(status.get("name", ""))
     issue_type_name = str(issue_type.get("name", "Issue"))
     project_key = str(project.get("key", "Jira"))
     project_name = str(project.get("name", project_key))
     snippet = jira_snippet(issue_type_name=issue_type_name, status_name=status_name, description=description)
     links = jira_issue_links(fields, base_url)
-    description_links = adf_links(fields.get("description"))
+    description_links = adf_links(description_value)
     if description_links:
         links.extend(description_links)
+    links.extend(text_links(description))
     if parent.get("key"):
         links.append(jira_issue_url(base_url, str(parent["key"])))
     return IndexedItem(
@@ -157,6 +168,58 @@ def jira_snippet(*, issue_type_name: str, status_name: str, description: str) ->
     return compact_text(" | ".join(parts))
 
 
+def first_field_value(fields: dict[str, Any], field_ids: list[str]) -> Any:
+    for field_id in field_ids:
+        value = fields.get(field_id)
+        if field_has_text(value):
+            return value
+    return None
+
+
+def field_has_text(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return bool(adf_text(value) or adf_links(value))
+    if isinstance(value, list):
+        return any(field_has_text(item) for item in value)
+    return bool(value)
+
+
+def resolve_description_fields(
+    source: SourceConfig,
+    base_url: str,
+    headers: dict[str, str],
+    fetch_json: JsonFetcher,
+) -> list[str]:
+    configured = string_list(source.settings.get("description_fields")) or ["description"]
+    direct_fields = [field for field in configured if is_field_id(field)]
+    named_fields = [field for field in configured if not is_field_id(field)]
+    if not named_fields:
+        return configured
+
+    payload = fetch_json(base_url, {"path": "/rest/api/3/field"}, headers)
+    field_lookup = {
+        str(field.get("name", "")).casefold(): str(field.get("id", ""))
+        for field in payload if isinstance(field, dict)
+    }
+    resolved = []
+    for field in configured:
+        if is_field_id(field):
+            resolved.append(field)
+            continue
+        field_id = field_lookup.get(field.casefold())
+        if field_id:
+            resolved.append(field_id)
+    return resolved or direct_fields or ["description"]
+
+
+def is_field_id(value: str) -> bool:
+    return value == "description" or value.startswith("customfield_")
+
+
 def adf_text(value: Any) -> str:
     parts: list[str] = []
 
@@ -196,6 +259,10 @@ def adf_links(value: Any) -> list[str]:
 
     walk(value)
     return deduplicate_links(links)
+
+
+def text_links(value: str) -> list[str]:
+    return deduplicate_links([match.rstrip(").,;") for match in re.findall(r"https?://\S+", value)])
 
 
 def deduplicate_links(links: list[str]) -> list[str]:

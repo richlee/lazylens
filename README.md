@@ -178,6 +178,7 @@ max_pages = 5
 name = "Personal Jira"
 type = "jira"
 project_keys = ["LAZY"]
+description_fields = ["description"]
 issue_limit = 100
 max_pages = 5
 ```
@@ -189,7 +190,13 @@ space.
 
 For Jira, `project_keys` is the simplest scope. You can set `jql` instead when
 you want to index a board, issue type, component, label, or other controlled
-slice.
+slice. `description_fields` is an ordered list of Jira field IDs or names to
+use for snippets and embedded links. The first field with content wins, so a
+project using a custom field can use:
+
+```toml
+description_fields = ["description", "Description (DSP)"]
+```
 
 If needed, `base_url`, `email`, or `api_token_env` can be set on Atlassian
 sources. Token values should stay out of TOML. `CONFLUENCE_BASE_URL` may be

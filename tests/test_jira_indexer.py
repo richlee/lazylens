@@ -4,7 +4,14 @@ from typing import Any
 
 import pytest
 
-from lazylens.indexers.jira import JiraError, adf_links, adf_text, iter_jira_items, iter_jira_refresh, jira_jql
+from lazylens.indexers.jira import (
+    JiraError,
+    adf_links,
+    adf_text,
+    iter_jira_items,
+    iter_jira_refresh,
+    jira_jql,
+)
 from lazylens.models import SearchResult, SourceConfig
 
 
@@ -163,6 +170,129 @@ def test_iter_jira_refresh_reports_unchanged_items(monkeypatch: pytest.MonkeyPat
     assert seen_item_keys == {"LAZY-1"}
     assert unchanged == 1
     assert complete is True
+
+
+def test_iter_jira_items_uses_ordered_description_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = SourceConfig(
+        key="jira",
+        name="Jira",
+        type="jira",
+        settings={
+            "project_keys": ["LAZY"],
+            "description_fields": ["description", "Description (DSP)"],
+        },
+    )
+    monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_EMAIL", "rich@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "secret")
+
+    def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> Any:
+        if request["path"] == "/rest/api/3/field":
+            return [
+                {"id": "description", "name": "Description"},
+                {"id": "customfield_10042", "name": "Description (DSP)"},
+            ]
+        if request["path"] == "/rest/api/3/search/jql":
+            assert request["body"]["fields"] == [
+                "summary",
+                "description",
+                "status",
+                "issuetype",
+                "project",
+                "parent",
+                "assignee",
+                "updated",
+                "created",
+                "issuelinks",
+                "customfield_10042",
+            ]
+            return {
+                "issues": [
+                    {
+                        "key": "LAZY-1",
+                        "fields": {
+                            "summary": "Use custom field description",
+                            "description": None,
+                            "customfield_10042": {
+                                "type": "doc",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": (
+                                                    "DSP delivery teams store the useful implementation narrative in "
+                                                    "a custom description field rather than the standard field."
+                                                ),
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            "updated": "2026-07-17T10:00:00.000+0000",
+                            "project": {"key": "LAZY", "name": "LazyLens"},
+                            "issuetype": {"name": "Story"},
+                            "status": {"name": "To Do"},
+                        },
+                    }
+                ]
+            }
+        raise AssertionError(request)
+
+    items = iter_jira_items(source, fetch_json=fetch_json)
+
+    assert items[0].snippet.startswith("Story | To Do | DSP delivery teams store")
+
+
+def test_iter_jira_items_extracts_plain_urls_from_description(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = SourceConfig(
+        key="jira",
+        name="Jira",
+        type="jira",
+        settings={"project_keys": ["LAZY"]},
+    )
+    monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_EMAIL", "rich@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "secret")
+
+    def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
+        assert request["path"] == "/rest/api/3/search/jql"
+        return {
+            "issues": [
+                {
+                    "key": "LAZY-1",
+                    "fields": {
+                        "summary": "Plain URL description",
+                        "description": {
+                            "type": "doc",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": (
+                                                "Related LLD: "
+                                                "https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD."
+                                            ),
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "updated": "2026-07-17T10:00:00.000+0000",
+                        "project": {"key": "LAZY", "name": "LazyLens"},
+                        "issuetype": {"name": "Story"},
+                        "status": {"name": "To Do"},
+                    },
+                }
+            ]
+        }
+
+    items = iter_jira_items(source, fetch_json=fetch_json)
+
+    assert items[0].links == ("https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD",)
 
 
 def test_iter_jira_items_requires_default_token(monkeypatch: pytest.MonkeyPatch) -> None:

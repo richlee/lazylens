@@ -134,7 +134,11 @@ def item_type_icon(result: SearchResult, icons: IconSet) -> str:
         if issue_type == "story":
             return "[S]" if icons is ICON_SETS["ascii"] else "\u25aa"
         if issue_type == "bug":
-            return "[B]" if icons is ICON_SETS["ascii"] else "!"
+            if icons is ICON_SETS["ascii"]:
+                return "[B]"
+            if icons is ICON_SETS["nerd"]:
+                return "\uf188"
+            return "!"
         return "[T]" if icons is ICON_SETS["ascii"] else "\u25ab"
     return icons.structure(result.structure_type)
 

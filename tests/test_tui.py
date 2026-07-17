@@ -8,7 +8,7 @@ from textual.widgets import Input, ListView
 import lazylens.tui as tui
 from lazylens.db import Index
 from lazylens.models import IndexedItem, SearchResult, SourceConfig
-from lazylens.tui import LazylensApp, icon_set, preview_text
+from lazylens.tui import LazylensApp, icon_set, item_type_icon, preview_text
 
 
 def test_tui_loads_indexed_results(tmp_path: Path) -> None:
@@ -87,6 +87,27 @@ def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
     assert nerd_icons.structure("parent-page") == "\uf07c"
     assert nerd_icons.source_for("confluence") == "\uf0ac"
     assert nerd_icons.source_for("jira") == "\uf0ae"
+
+
+def test_jira_bug_uses_bug_icon_in_nerd_font() -> None:
+    bug = SearchResult(
+        id=1,
+        source_key="jira",
+        item_key="LAZY-1",
+        title="LAZY-1 - Bug",
+        url="https://example.atlassian.net/browse/LAZY-1",
+        path="LAZY/LAZY-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T10:00:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Bug | To Do | Fix broken icon.",
+        rank=0.0,
+    )
+
+    assert item_type_icon(bug, icon_set("ascii")) == "[B]"
+    assert item_type_icon(bug, icon_set("nerd")) == "\uf188"
 
 
 def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:

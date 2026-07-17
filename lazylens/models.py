@@ -16,6 +16,11 @@ class SourceConfig:
 
 
 @dataclass(frozen=True)
+class UiConfig:
+    icon_style: str = "ascii"
+
+
+@dataclass(frozen=True)
 class SourceSummary:
     key: str
     name: str

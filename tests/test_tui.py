@@ -8,7 +8,7 @@ from textual.widgets import Input, ListView
 import lazylens.tui as tui
 from lazylens.db import Index
 from lazylens.models import IndexedItem, SearchResult, SourceConfig
-from lazylens.tui import LazylensApp, preview_text
+from lazylens.tui import LazylensApp, icon_set, preview_text
 
 
 def test_tui_loads_indexed_results(tmp_path: Path) -> None:
@@ -70,6 +70,17 @@ def test_preview_text_formats_metadata_and_highlights_query() -> None:
     assert "local |" not in text.plain
     assert "Owner:" not in text.plain
     assert any(text.plain[span.start : span.end] == "Share" for span in text.spans)
+
+
+def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
+    ascii_icons = icon_set("ascii")
+    nerd_icons = icon_set("nerd")
+
+    assert ascii_icons.structure("parent-page") == "[P+]"
+    assert ascii_icons.page == ""
+    assert ascii_icons.source_for("confluence") == ""
+    assert nerd_icons.structure("parent-page") == "\uf07c"
+    assert nerd_icons.source_for("confluence") == "\uf0ac"
 
 
 def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:

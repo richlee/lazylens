@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lazylens.config import configured_db_path, load_sources
+import pytest
+
+from lazylens.config import ConfigError, configured_db_path, load_sources, load_ui_config
 
 
 def test_load_sources_from_config(tmp_path: Path) -> None:
@@ -39,3 +41,39 @@ space_keys = ["ARCH"]
     assert sources[1].key == "work"
     assert sources[1].type == "confluence"
     assert sources[1].settings["space_keys"] == ["ARCH"]
+
+
+def test_load_ui_config_defaults_to_ascii(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("")
+
+    ui_config = load_ui_config(config)
+
+    assert ui_config.icon_style == "ascii"
+
+
+def test_load_ui_config_accepts_nerd_icons(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """
+[ui]
+icon_style = "nerd"
+"""
+    )
+
+    ui_config = load_ui_config(config)
+
+    assert ui_config.icon_style == "nerd"
+
+
+def test_load_ui_config_rejects_unknown_icon_style(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """
+[ui]
+icon_style = "emoji"
+"""
+    )
+
+    with pytest.raises(ConfigError, match="icon_style"):
+        load_ui_config(config)

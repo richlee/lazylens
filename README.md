@@ -51,6 +51,9 @@ The generated config is a small TOML file:
 ```toml
 database = "~/.local/share/lazylens/index.sqlite3"
 
+[ui]
+icon_style = "ascii" # ascii, unicode, or nerd
+
 [sources.notes]
 name = "Notes"
 type = "local"
@@ -77,6 +80,23 @@ The TUI currently supports the local index demo flow:
 
 For local folders, the canonical URL defaults to the local file URI.
 
+## UI Icons
+
+The TUI defaults to portable ASCII labels, so it works in plain terminals. Set
+`icon_style` if you want richer symbols:
+
+```toml
+[ui]
+icon_style = "nerd" # ascii, unicode, or nerd
+```
+
+`nerd` mode expects a Nerd Font in your terminal, for example FiraCode Nerd Font.
+On macOS with Homebrew:
+
+```sh
+brew install --cask font-fira-code-nerd-font
+```
+
 ## Source Config
 
 `lazylens` currently supports local folders and an early Confluence Cloud page
@@ -86,6 +106,9 @@ used to refresh the local index.
 
 ```toml
 database = "~/.local/share/lazylens/index.sqlite3"
+
+[ui]
+icon_style = "ascii"
 
 [sources."notes"]
 name = "Notes"

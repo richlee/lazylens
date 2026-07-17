@@ -3,7 +3,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from lazylens.models import SourceConfig
+from lazylens.models import SourceConfig, UiConfig
 from lazylens.paths import default_config_path, default_db_path
 
 
@@ -43,6 +43,22 @@ def load_sources(config_path: str | Path | None = None) -> list[SourceConfig]:
             )
         )
     return sources
+
+
+def load_ui_config(config_path: str | Path | None = None) -> UiConfig:
+    path = Path(config_path).expanduser() if config_path else default_config_path()
+    if not path.exists():
+        return UiConfig()
+
+    data = tomllib.loads(path.read_text())
+    ui_data = data.get("ui", {})
+    if not isinstance(ui_data, dict):
+        raise ConfigError("[ui] must be a TOML table")
+
+    icon_style = str(ui_data.get("icon_style", "ascii")).lower()
+    if icon_style not in {"ascii", "unicode", "nerd"}:
+        raise ConfigError('[ui].icon_style must be one of "ascii", "unicode", or "nerd"')
+    return UiConfig(icon_style=icon_style)
 
 
 def configured_db_path(config_path: str | Path | None = None) -> Path:

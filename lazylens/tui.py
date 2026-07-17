@@ -6,6 +6,7 @@ import subprocess
 import sys
 import webbrowser
 from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.text import Text
@@ -14,27 +15,97 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Input, Label, ListItem, ListView, Static
 
-from lazylens.config import configured_db_path, load_sources
+from lazylens.config import configured_db_path, load_sources, load_ui_config
 from lazylens.db import Index
 from lazylens.indexers.adapters import IndexingError, iter_source_items
-from lazylens.models import CategorySummary, RelatedItem, SearchResult, SourceConfig, SourceSummary
+from lazylens.models import CategorySummary, RelatedItem, SearchResult, SourceConfig, SourceSummary, UiConfig
 from lazylens.paths import default_config_path
 
 
+@dataclass(frozen=True)
+class IconSet:
+    space: str
+    parent_page: str
+    page: str
+    folder: str
+    link: str
+    external_link: str
+    source: str
+    local_source: str
+    confluence_source: str
+
+    def structure(self, kind: str) -> str:
+        if kind == "space":
+            return self.space
+        if kind == "parent-page":
+            return self.parent_page
+        if kind == "page":
+            return self.page
+        return self.folder
+
+    def source_for(self, source_type: str) -> str:
+        if source_type == "local":
+            return self.local_source
+        if source_type == "confluence":
+            return self.confluence_source
+        return self.source
+
+
+ICON_SETS = {
+    "ascii": IconSet(
+        space="[S]",
+        parent_page="[P+]",
+        page="",
+        folder="[F]",
+        link="",
+        external_link="[ext]",
+        source="",
+        local_source="",
+        confluence_source="",
+    ),
+    "unicode": IconSet(
+        space="\u25a3",
+        parent_page="\u25b8",
+        page="\u25a1",
+        folder="\u25b9",
+        link="\u2192",
+        external_link="\u2197",
+        source="\u25c9",
+        local_source="\u25c7",
+        confluence_source="\u25ce",
+    ),
+    "nerd": IconSet(
+        space="\uf0ac",
+        parent_page="\uf07c",
+        page="\uf15b",
+        folder="\uf07b",
+        link="\uf0c1",
+        external_link="\uf08e",
+        source="\uf0c2",
+        local_source="\uf07b",
+        confluence_source="\uf0ac",
+    ),
+}
+
+
+def icon_set(style: str) -> IconSet:
+    return ICON_SETS.get(style, ICON_SETS["ascii"])
+
+
 class CategoryItem(ListItem):
-    def __init__(self, category: CategorySummary | None) -> None:
+    def __init__(self, category: CategorySummary | None, icons: IconSet) -> None:
         self.category_key = category.key if category else None
         self.item_id = category.item_id if category else None
         self.kind = category.kind if category else "space"
         label = "All" if category is None else category.name
         count = "" if category is None else f" ({category.count})"
-        super().__init__(Label(f"{structure_icon(self.kind)} {label}{count}", markup=False))
+        super().__init__(Label(f"{icons.structure(self.kind)} {label}{count}", markup=False))
 
 
 class ResultItem(ListItem):
-    def __init__(self, result: SearchResult) -> None:
+    def __init__(self, result: SearchResult, icons: IconSet) -> None:
         self.result = result
-        super().__init__(Label(result.title, markup=False))
+        super().__init__(Label(f"{icons.page} {result.title}".strip(), markup=False))
 
 
 class MessageItem(ListItem):
@@ -43,9 +114,12 @@ class MessageItem(ListItem):
 
 
 class RelationItem(ListItem):
-    def __init__(self, item: RelatedItem) -> None:
+    def __init__(self, item: RelatedItem, icons: IconSet) -> None:
         self.related_item = item
-        label = item.title if item.item_id is not None else f"{item.title} (external)"
+        icon = icons.link if item.item_id is not None else icons.external_link
+        label = f"{icon} {item.title}".strip()
+        if item.item_id is None:
+            label = f"{label} (external)"
         super().__init__(Label(label, markup=False), disabled=item.item_id is None)
 
 
@@ -165,6 +239,8 @@ class LazylensApp(App[None]):
         self.display_config_path = Path(config_path).expanduser() if config_path else default_config_path()
         self.sources: list[SourceSummary] = []
         self.configured_sources: list[SourceConfig] = []
+        self.ui_config = UiConfig()
+        self.icons = icon_set(self.ui_config.icon_style)
         self.results: list[SearchResult] = []
         self.selected_source_key: str | None = None
         self.selected_category_key: str | None = None
@@ -199,6 +275,8 @@ class LazylensApp(App[None]):
 
     async def on_mount(self) -> None:
         self.configured_sources = load_sources(self.config_path)
+        self.ui_config = load_ui_config(self.config_path)
+        self.icons = icon_set(self.ui_config.icon_style)
         await self.reload_from_db()
         self.query_one("#results", ListView).focus()
 
@@ -223,7 +301,9 @@ class LazylensApp(App[None]):
             self.selected_category_key = None
             await self.refresh_results()
             return
-        await category_list.extend([CategoryItem(None), *[CategoryItem(category) for category in categories]])
+        await category_list.extend(
+            [CategoryItem(None, self.icons), *[CategoryItem(category, self.icons) for category in categories]]
+        )
         category_list.index = 0
         self.selected_category_key = None
         self.pending_category_key = None
@@ -240,7 +320,7 @@ class LazylensApp(App[None]):
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
         if self.results:
-            await result_list.extend([ResultItem(result) for result in self.results])
+            await result_list.extend([ResultItem(result, self.icons) for result in self.results])
             result_list.index = self.result_index(highlight_item_id)
             await self.update_current_result(self.results[result_list.index or 0])
             return
@@ -257,7 +337,9 @@ class LazylensApp(App[None]):
         parts = []
         for index, source in enumerate(self.sources[:9], start=1):
             marker = "*" if source.key == self.selected_source_key else " "
-            parts.append(f"[{index}]{marker} {source.name} ({source.count})")
+            icon = self.icons.source_for(source.type)
+            label = f"{icon} {source.name}".strip()
+            parts.append(f"[{index}]{marker} {label} ({source.count})")
         sources.update(Text("Sources: " + " | ".join(parts)))
 
     async def update_current_result(self, result: SearchResult | None) -> None:
@@ -316,13 +398,13 @@ class LazylensApp(App[None]):
             incoming = index.incoming_links(result.id)
             outgoing = index.outgoing_links(result.id)
         if incoming:
-            await incoming_list.extend([RelationItem(item) for item in incoming])
+            await incoming_list.extend([RelationItem(item, self.icons) for item in incoming])
             incoming_list.index = 0
         else:
             await incoming_list.append(MessageItem("No incoming links"))
             incoming_list.index = None
         if outgoing:
-            await outgoing_list.extend([RelationItem(item) for item in outgoing])
+            await outgoing_list.extend([RelationItem(item, self.icons) for item in outgoing])
             outgoing_list.index = 0
         else:
             await outgoing_list.append(MessageItem("No outgoing links"))
@@ -426,7 +508,7 @@ class LazylensApp(App[None]):
         self.results = [result]
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
-        await result_list.append(ResultItem(result))
+        await result_list.append(ResultItem(result, self.icons))
         result_list.index = 0
         await self.update_current_result(result)
         result_list.focus()
@@ -549,13 +631,3 @@ def format_datetime(value: str) -> str:
     except ValueError:
         return value
     return parsed.strftime("%Y-%m-%d %H:%M")
-
-
-def structure_icon(kind: str) -> str:
-    if kind == "space":
-        return "[S]"
-    if kind == "parent-page":
-        return "[P+]"
-    if kind == "page":
-        return "[P]"
-    return "[F]"

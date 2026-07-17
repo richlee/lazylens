@@ -440,6 +440,7 @@ class LazylensApp(App[None]):
         self.results: list[SearchResult] = []
         self.selected_project_key: str | None = None
         self.selected_source_key: str | None = None
+        self.source_results_active = False
         self.selected_category_key: str | None = None
         self.pending_category_key: str | None = None
         self.query_text = ""
@@ -546,9 +547,14 @@ class LazylensApp(App[None]):
     async def refresh_results(self, *, highlight_item_id: int | None = None) -> None:
         with Index(self.db_path) as index:
             source_keys = self.selected_project_source_keys()
-            active_source_key = self.selected_source_key if self.selected_category_key else None
-            if not self.query_text and self.selected_category_key is None and active_source_key is None:
-                self.results = index.project_overview(source_keys=source_keys, limit=200)
+            active_source_key = (
+                self.selected_source_key
+                if self.selected_category_key or self.source_results_active
+                else None
+            )
+            if not self.query_text and self.selected_category_key is None:
+                overview_source_keys = [active_source_key] if active_source_key else source_keys
+                self.results = index.project_overview(source_keys=overview_source_keys, limit=200)
             else:
                 self.results = index.search(
                     self.query_text,
@@ -595,7 +601,7 @@ class LazylensApp(App[None]):
             icon = self.icons.source_for(source.type)
             label = f"{icon} {source.name}".strip()
             parts.append(f"[{shortcut}]{marker} {label} ({source.count})")
-        sources.update(Text("Structure Sources: " + " | ".join(parts)))
+        sources.update(Text("Sources: " + " | ".join(parts)))
 
     async def update_current_result(self, result: SearchResult | None) -> None:
         self.update_preview(result)
@@ -747,6 +753,7 @@ class LazylensApp(App[None]):
         project_source_keys = set(self.selected_project_source_keys())
         self.project_sources = [source for source in self.sources if source.key in project_source_keys]
         self.selected_source_key = self.project_sources[0].key if self.project_sources else None
+        self.source_results_active = False
         self.selected_category_key = None
         self.pending_category_key = None
         self.history.clear()
@@ -763,6 +770,7 @@ class LazylensApp(App[None]):
         if index < 0 or index >= len(self.project_sources):
             return
         self.selected_source_key = self.project_sources[index].key
+        self.source_results_active = True
         self.selected_category_key = None
         self.pending_category_key = None
         self.history.clear()
@@ -798,6 +806,7 @@ class LazylensApp(App[None]):
             return
         self.history.clear()
         self.result_stack.clear()
+        self.source_results_active = True
         self.selected_category_key = self.pending_category_key
         await self.refresh_results()
         self.query_one("#results", ListView).focus()

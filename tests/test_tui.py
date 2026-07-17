@@ -960,6 +960,7 @@ sources = ["dsp-beta", "DSPBeta"]
 
             assert app.projects[0].name == "DSP"
             assert [source.key for source in app.project_sources] == ["dsp-beta", "DSPBeta"]
+            assert app.query_one("#sources", Static).render().plain.startswith("Sources:")
             assert [getattr(item, "kind", "") for item in categories.children] == [
                 "space",
                 "folder",
@@ -977,7 +978,6 @@ sources = ["dsp-beta", "DSPBeta"]
 
             assert app.selected_source_key == "DSPBeta"
             assert [result.title for result in app.results] == [
-                "DSP LLD",
                 "DSPBeta-1 - Build relationship view",
             ]
 
@@ -989,8 +989,14 @@ sources = ["dsp-beta", "DSPBeta"]
 
             assert [result.title for result in app.results] == ["DSPBeta-1 - Build relationship view"]
 
+            await pilot.press("a")
+            await pilot.pause()
+
+            assert app.selected_source_key == "dsp-beta"
+            assert [result.title for result in app.results] == ["DSP LLD"]
+
             categories.focus()
-            categories.index = 2
+            categories.index = 3
             await pilot.press("enter")
             await pilot.pause()
 

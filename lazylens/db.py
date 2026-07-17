@@ -303,6 +303,49 @@ class Index:
             for row in rows
         ]
 
+    def project_overview(
+        self,
+        *,
+        source_keys: Iterable[str],
+        limit: int = 200,
+    ) -> list[SearchResult]:
+        project_source_keys = sorted(set(source_keys))
+        if not project_source_keys:
+            return []
+        placeholders = ", ".join("?" for _source_key in project_source_keys)
+        rows = self.connection.execute(
+            f"""
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            JOIN sources ON sources.key = items.source_key
+            WHERE items.source_key IN ({placeholders})
+              AND items.structure_type = 'page'
+              AND (
+                    sources.type != 'jira'
+                 OR EXISTS (
+                        SELECT 1
+                        FROM items AS epic
+                        WHERE epic.source_key = items.source_key
+                          AND epic.item_key = items.parent_key
+                          AND epic.structure_type = 'page'
+                          AND LOWER(epic.snippet) LIKE 'epic%'
+                    )
+              )
+            ORDER BY
+                CASE sources.type
+                    WHEN 'confluence' THEN 0
+                    WHEN 'local' THEN 1
+                    WHEN 'jira' THEN 2
+                    ELSE 3
+                END,
+                modified_at DESC,
+                title COLLATE NOCASE
+            LIMIT ?
+            """,
+            (*project_source_keys, limit),
+        ).fetchall()
+        return [search_result_from_row(row) for row in rows]
+
     def item_by_id(self, item_id: int) -> SearchResult | None:
         row = self.connection.execute(
             """
@@ -470,15 +513,57 @@ class Index:
         ]
         return [root, *epics]
 
-    def jira_epics(self, *, source_key: str) -> list[SearchResult]:
+    def jira_epic_structure(self, *, source_keys: Iterable[str]) -> list[CategorySummary]:
+        project_source_keys = sorted(set(source_keys))
+        if not project_source_keys:
+            return []
+        placeholders = ", ".join("?" for _source_key in project_source_keys)
+        rows = self.connection.execute(
+            f"""
+            SELECT epic.id,
+                   epic.item_key,
+                   epic.title,
+                   epic.source_key,
+                   COUNT(child.id) AS child_count
+            FROM items AS epic
+            JOIN sources ON sources.key = epic.source_key
+            LEFT JOIN items AS child
+              ON child.source_key = epic.source_key
+             AND child.parent_key = epic.item_key
+             AND child.structure_type = 'page'
+            WHERE epic.source_key IN ({placeholders})
+              AND sources.type = 'jira'
+              AND epic.structure_type = 'page'
+              AND LOWER(epic.snippet) LIKE 'epic%'
+            GROUP BY epic.id, epic.item_key, epic.title, epic.source_key
+            ORDER BY epic.title COLLATE NOCASE
+            """,
+            tuple(project_source_keys),
+        ).fetchall()
+        return [
+            CategorySummary(
+                key=f"{row['source_key']}:{row['item_key']}",
+                name=str(row["title"]),
+                count=int(row["child_count"]),
+                kind="epic",
+                item_id=int(row["id"]),
+            )
+            for row in rows
+        ]
+
+    def jira_epic_children(self, *, source_key: str) -> list[SearchResult]:
         rows = self.connection.execute(
             """
-            SELECT items.*, 0.0 AS rank
-            FROM items
-            WHERE source_key = ?
-              AND structure_type = 'page'
-              AND LOWER(snippet) LIKE 'epic%'
-            ORDER BY title COLLATE NOCASE
+            SELECT child.*, 0.0 AS rank
+            FROM items AS child
+            JOIN items AS epic
+              ON epic.source_key = child.source_key
+             AND epic.item_key = child.parent_key
+             AND epic.structure_type = 'page'
+             AND LOWER(epic.snippet) LIKE 'epic%'
+            WHERE child.source_key = ?
+              AND child.structure_type = 'page'
+            ORDER BY child.title COLLATE NOCASE
             """,
             (source_key,),
         ).fetchall()

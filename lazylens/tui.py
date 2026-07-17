@@ -382,6 +382,10 @@ class LazylensApp(App[None]):
                 categories = index.jira_structure(source_key=self.selected_source_key)
             else:
                 categories = index.categories(source_key=self.selected_source_key)
+                categories = [
+                    *categories,
+                    *index.jira_epic_structure(source_keys=self.selected_project_source_keys()),
+                ]
         category_list = self.query_one("#categories", ListView)
         await category_list.clear()
         if not self.project_sources:
@@ -403,13 +407,16 @@ class LazylensApp(App[None]):
         with Index(self.db_path) as index:
             source_keys = self.selected_project_source_keys()
             active_source_key = self.selected_source_key if self.selected_category_key else None
-            self.results = index.search(
-                self.query_text,
-                limit=200,
-                source_key=active_source_key,
-                source_keys=source_keys if active_source_key is None else None,
-                category=self.selected_category_key,
-            )
+            if not self.query_text and self.selected_category_key is None and active_source_key is None:
+                self.results = index.project_overview(source_keys=source_keys, limit=200)
+            else:
+                self.results = index.search(
+                    self.query_text,
+                    limit=200,
+                    source_key=active_source_key,
+                    source_keys=source_keys if active_source_key is None else None,
+                    category=self.selected_category_key,
+                )
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
         if self.results:
@@ -623,7 +630,7 @@ class LazylensApp(App[None]):
         ):
             self.history.clear()
             self.result_stack.clear()
-            await self.show_jira_epics(self.selected_source_key)
+            await self.show_jira_epic_children(self.selected_source_key)
             return
         self.history.clear()
         self.result_stack.clear()
@@ -700,10 +707,10 @@ class LazylensApp(App[None]):
             self.push_result_stack()
         await self.replace_results(children)
 
-    async def show_jira_epics(self, source_key: str) -> None:
+    async def show_jira_epic_children(self, source_key: str) -> None:
         with Index(self.db_path) as index:
-            epics = index.jira_epics(source_key=source_key)
-        await self.replace_results(epics, empty_message="No Epics indexed for this Jira source")
+            children = index.jira_epic_children(source_key=source_key)
+        await self.replace_results(children, empty_message="No Epic child tickets indexed for this Jira source")
 
     async def show_context_result(self, result: SearchResult, *, push_history: bool = True) -> None:
         if push_history:

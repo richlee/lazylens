@@ -285,7 +285,9 @@ def test_index_exposes_jira_project_root_and_epics(tmp_path: Path) -> None:
         index.upsert_source(source)
         index.upsert_items([epic, story, bug])
         structure = index.jira_structure(source_key="jira")
-        epics = index.jira_epics(source_key="jira")
+        project_epics = index.jira_epic_structure(source_keys=["jira"])
+        epic_children = index.jira_epic_children(source_key="jira")
+        overview = index.project_overview(source_keys=["jira"])
         children = index.children(source_key="jira", parent_key="LAZY-1")
 
     assert [node.kind for node in structure] == ["jira-project", "epic"]
@@ -293,7 +295,9 @@ def test_index_exposes_jira_project_root_and_epics(tmp_path: Path) -> None:
     assert structure[0].count == 3
     assert structure[1].name == "LAZY-1 - Build document graph"
     assert structure[1].count == 1
-    assert [item.title for item in epics] == ["LAZY-1 - Build document graph"]
+    assert [node.name for node in project_epics] == ["LAZY-1 - Build document graph"]
+    assert [item.title for item in epic_children] == ["LAZY-2 - Add source selector"]
+    assert [item.title for item in overview] == ["LAZY-2 - Add source selector"]
     assert [item.title for item in children] == ["LAZY-2 - Add source selector"]
 
 

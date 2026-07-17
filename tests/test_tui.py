@@ -575,6 +575,9 @@ def test_tui_right_from_pages_focuses_incoming_when_no_outgoing_links(tmp_path: 
             incoming = app.query_one("#incoming", ListView)
 
             assert app.focused is results
+            await app.apply_search("Epic")
+            await pilot.pause()
+
             assert app.results[0].title == "LAZY-1 - Epic"
             await pilot.press("right")
             await pilot.pause()
@@ -642,11 +645,7 @@ def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -
             categories = app.query_one("#categories", ListView)
 
             assert [getattr(item, "kind", "") for item in categories.children] == ["jira-project", "epic"]
-            assert [result.title for result in app.results] == [
-                "LAZY-1 - Epic",
-                "LAZY-2 - Story",
-                "LAZY-3 - Bug",
-            ]
+            assert [result.title for result in app.results] == ["LAZY-2 - Story"]
 
             categories.focus()
             categories.index = 1
@@ -764,6 +763,19 @@ sources = ["dsp-beta", "DSPBeta"]
         container="dsp-beta",
         snippet="DSP architecture design.",
     )
+    epic = IndexedItem(
+        source_key="DSPBeta",
+        item_key="DSPBeta-100",
+        title="DSPBeta-100 - Relationship navigation",
+        url="https://example.atlassian.net/browse/DSPBeta-100",
+        path="DSPBeta/DSPBeta-100",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T12:00:00+00:00",
+        owner="",
+        category="DSP Beta",
+        container="DSPBeta",
+        snippet="Epic | In Progress | Relationship navigation.",
+    )
     story = IndexedItem(
         source_key="DSPBeta",
         item_key="DSPBeta-1",
@@ -776,6 +788,7 @@ sources = ["dsp-beta", "DSPBeta"]
         category="DSP Beta",
         container="DSPBeta",
         snippet="Story | To Do | Build a relationship view for the DSP project.",
+        parent_key="DSPBeta-100",
     )
     outside = IndexedItem(
         source_key="other",
@@ -795,19 +808,21 @@ sources = ["dsp-beta", "DSPBeta"]
         index.upsert_source(confluence_source)
         index.upsert_source(jira_source)
         index.upsert_source(other_source)
-        index.upsert_items([lld, story, outside])
+        index.upsert_items([lld, epic, story, outside])
 
     async def run_app() -> None:
         app = LazylensApp(config_path=config_path, db_path=db_path)
         async with app.run_test() as pilot:
             await pilot.pause()
+            categories = app.query_one("#categories", ListView)
 
             assert app.projects[0].name == "DSP"
             assert [source.key for source in app.project_sources] == ["dsp-beta", "DSPBeta"]
-            assert {result.title for result in app.results} == {
+            assert [getattr(item, "kind", "") for item in categories.children] == ["space", "folder", "epic"]
+            assert [result.title for result in app.results] == [
                 "DSP LLD",
                 "DSPBeta-1 - Build relationship view",
-            }
+            ]
             assert all(result.source_key != "other" for result in app.results)
 
             await pilot.press("b")
@@ -818,5 +833,13 @@ sources = ["dsp-beta", "DSPBeta"]
                 "DSP LLD",
                 "DSPBeta-1 - Build relationship view",
             ]
+
+            categories = app.query_one("#categories", ListView)
+            categories.focus()
+            categories.index = 1
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert [result.title for result in app.results] == ["DSPBeta-1 - Build relationship view"]
 
     asyncio.run(run_app())

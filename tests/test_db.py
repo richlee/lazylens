@@ -19,9 +19,10 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         content_type="text/markdown",
         modified_at="2026-07-16T13:00:00+00:00",
         owner="",
-        category="Architecture",
+        category="Architecture Notes",
         container="architecture",
         snippet="High level design.",
+        parent_key="architecture.md",
     )
     decision = IndexedItem(
         source_key="local",
@@ -32,7 +33,7 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         content_type="text/html",
         modified_at="2026-07-16T13:30:00+00:00",
         owner="",
-        category="Architecture",
+        category="Architecture Notes",
         container="architecture",
         snippet="API refresh should update the local index.",
     )
@@ -96,7 +97,11 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert sources[0].name == "Local"
     assert sources[0].count == 3
     assert categories[0].name == "Architecture"
-    assert categories[0].count == 3
+    assert categories[0].count == 1
+    assert categories[0].kind == "folder"
+    assert categories[1].name == "Architecture Notes"
+    assert categories[1].count == 2
+    assert categories[1].kind == "parent-page"
 
 
 def test_index_migrates_existing_database(tmp_path: Path) -> None:

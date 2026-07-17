@@ -251,7 +251,16 @@ class Index:
                 SELECT grouped.category,
                        grouped.count,
                        top_level.id AS item_id,
-                       COALESCE(top_level.structure_type, 'folder') AS kind
+                       CASE
+                         WHEN top_level.id IS NULL THEN 'folder'
+                         WHEN EXISTS (
+                           SELECT 1
+                           FROM items AS child
+                           WHERE child.source_key = top_level.source_key
+                             AND child.parent_key = top_level.item_key
+                         ) THEN 'parent-page'
+                         ELSE top_level.structure_type
+                       END AS kind
                 FROM (
                     SELECT category, COUNT(*) AS count
                     FROM items
@@ -272,7 +281,16 @@ class Index:
                 SELECT grouped.category,
                        grouped.count,
                        top_level.id AS item_id,
-                       COALESCE(top_level.structure_type, 'folder') AS kind
+                       CASE
+                         WHEN top_level.id IS NULL THEN 'folder'
+                         WHEN EXISTS (
+                           SELECT 1
+                           FROM items AS child
+                           WHERE child.source_key = top_level.source_key
+                             AND child.parent_key = top_level.item_key
+                         ) THEN 'parent-page'
+                         ELSE top_level.structure_type
+                       END AS kind
                 FROM (
                     SELECT category, COUNT(*) AS count
                     FROM items

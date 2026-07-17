@@ -554,6 +554,8 @@ def format_datetime(value: str) -> str:
 def structure_icon(kind: str) -> str:
     if kind == "space":
         return "[S]"
+    if kind == "parent-page":
+        return "[P+]"
     if kind == "page":
         return "[P]"
     return "[F]"

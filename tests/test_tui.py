@@ -367,7 +367,7 @@ def test_tui_enter_drills_into_folder_result_and_back_restores_parent(tmp_path: 
     asyncio.run(run_app())
 
 
-def test_tui_right_drills_into_page_children_without_changing_enter_open(tmp_path: Path, monkeypatch) -> None:
+def test_tui_right_drills_into_page_children_when_no_links_exist(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
     product = IndexedItem(
@@ -457,6 +457,76 @@ def test_tui_right_drills_into_page_children_without_changing_enter_open(tmp_pat
             await pilot.press("enter")
             await pilot.pause()
             assert [result.title for result in app.results] == ["SharePoint Field Note"]
+
+    asyncio.run(run_app())
+
+
+def test_tui_right_from_pages_focuses_outgoing_links_before_children(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    hld = IndexedItem(
+        source_key="local",
+        item_key="hld.md",
+        title="HLD",
+        url="file:///hld.md",
+        path="/tmp/hld.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T14:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="High level design.",
+        links=("file:///decision.md",),
+    )
+    child = IndexedItem(
+        source_key="local",
+        item_key="lld.md",
+        title="LLD",
+        url="file:///lld.md",
+        path="/tmp/lld.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T12:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="Low level design.",
+        parent_key="hld.md",
+    )
+    decision = IndexedItem(
+        source_key="local",
+        item_key="decision.md",
+        title="Decision",
+        url="file:///decision.md",
+        path="/tmp/decision.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="Decision context.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([hld, child, decision])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            results = app.query_one("#results", ListView)
+            outgoing = app.query_one("#outgoing", ListView)
+
+            assert app.focused is results
+            assert app.results[0].title == "HLD"
+            await pilot.press("right")
+            await pilot.pause()
+
+            assert app.focused is outgoing
+            assert [result.title for result in app.results] == ["HLD", "Decision", "LLD"]
+            highlighted = outgoing.highlighted_child
+            assert highlighted is not None
+            assert getattr(highlighted, "related_item").title == "Decision"
 
     asyncio.run(run_app())
 

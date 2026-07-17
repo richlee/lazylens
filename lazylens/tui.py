@@ -270,8 +270,8 @@ class LazylensApp(App[None]):
                 yield ListView(id="incoming")
         yield Static(
             Text(
-                "Structure: Enter | Open/Drill: Enter | Drill/Follow: Right/Space | Back: Left/Backspace | "
-                "Search: / | Clear Search: c | Refresh: r | Quit: q"
+                "Structure: Enter | Open/Drill: Enter | Links: Right/Space | Follow Link: Enter/Right | "
+                "Back: Left/Backspace | Search: / | Clear Search: c | Refresh: r | Quit: q"
             ),
             id="commands",
         )
@@ -500,11 +500,18 @@ class LazylensApp(App[None]):
     async def action_follow_relation(self) -> None:
         focused = self.focused
         if focused is self.query_one("#results", ListView):
-            result = self.selected_result()
-            if result is not None:
-                await self.drill_into_result(result)
+            await self.focus_outgoing_links()
             return
         await self.follow_selected_relation()
+
+    async def focus_outgoing_links(self) -> None:
+        outgoing = self.query_one("#outgoing", ListView)
+        if isinstance(outgoing.highlighted_child, RelationItem):
+            outgoing.focus()
+            return
+        result = self.selected_result()
+        if result is not None:
+            await self.drill_into_result(result)
 
     async def action_back(self) -> None:
         if isinstance(self.focused, Input):

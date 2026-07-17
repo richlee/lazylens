@@ -78,10 +78,14 @@ def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
     nerd_icons = icon_set("nerd")
 
     assert ascii_icons.structure("parent-page") == "[P+]"
+    assert ascii_icons.structure("unparented") == "[?]"
+    assert ascii_icons.project == ""
     assert ascii_icons.page == ""
     assert ascii_icons.source_for("confluence") == "[C]"
+    assert nerd_icons.project == ""
     assert nerd_icons.structure("parent-page") == "\uf07c"
     assert nerd_icons.source_for("confluence") == "\uf0ac"
+    assert nerd_icons.source_for("jira") == "J"
 
 
 def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:
@@ -644,7 +648,11 @@ def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -
             await pilot.pause()
             categories = app.query_one("#categories", ListView)
 
-            assert [getattr(item, "kind", "") for item in categories.children] == ["jira-project", "epic"]
+            assert [getattr(item, "kind", "") for item in categories.children] == [
+                "jira-project",
+                "epic",
+                "unparented",
+            ]
             assert [result.title for result in app.results] == ["LAZY-2 - Story"]
 
             categories.focus()
@@ -653,6 +661,13 @@ def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -
             await pilot.pause()
 
             assert [result.title for result in app.results] == ["LAZY-2 - Story"]
+
+            categories.focus()
+            categories.index = 2
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert [result.title for result in app.results] == ["LAZY-3 - Bug"]
 
     asyncio.run(run_app())
 
@@ -790,6 +805,19 @@ sources = ["dsp-beta", "DSPBeta"]
         snippet="Story | To Do | Build a relationship view for the DSP project.",
         parent_key="DSPBeta-100",
     )
+    bug = IndexedItem(
+        source_key="DSPBeta",
+        item_key="DSPBeta-2",
+        title="DSPBeta-2 - Fix orphaned ticket",
+        url="https://example.atlassian.net/browse/DSPBeta-2",
+        path="DSPBeta/DSPBeta-2",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T12:30:00+00:00",
+        owner="",
+        category="DSP Beta",
+        container="DSPBeta",
+        snippet="Bug | To Do | Fix orphaned ticket.",
+    )
     outside = IndexedItem(
         source_key="other",
         item_key="other",
@@ -808,7 +836,7 @@ sources = ["dsp-beta", "DSPBeta"]
         index.upsert_source(confluence_source)
         index.upsert_source(jira_source)
         index.upsert_source(other_source)
-        index.upsert_items([lld, epic, story, outside])
+        index.upsert_items([lld, epic, story, bug, outside])
 
     async def run_app() -> None:
         app = LazylensApp(config_path=config_path, db_path=db_path)
@@ -818,7 +846,12 @@ sources = ["dsp-beta", "DSPBeta"]
 
             assert app.projects[0].name == "DSP"
             assert [source.key for source in app.project_sources] == ["dsp-beta", "DSPBeta"]
-            assert [getattr(item, "kind", "") for item in categories.children] == ["space", "folder", "epic"]
+            assert [getattr(item, "kind", "") for item in categories.children] == [
+                "space",
+                "folder",
+                "epic",
+                "unparented",
+            ]
             assert [result.title for result in app.results] == [
                 "DSP LLD",
                 "DSPBeta-1 - Build relationship view",
@@ -841,5 +874,12 @@ sources = ["dsp-beta", "DSPBeta"]
             await pilot.pause()
 
             assert [result.title for result in app.results] == ["DSPBeta-1 - Build relationship view"]
+
+            categories.focus()
+            categories.index = 2
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert [result.title for result in app.results] == ["DSPBeta-2 - Fix orphaned ticket"]
 
     asyncio.run(run_app())

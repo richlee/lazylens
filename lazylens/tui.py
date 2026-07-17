@@ -46,6 +46,8 @@ class IconSet:
     jira_source: str
 
     def structure(self, kind: str) -> str:
+        if kind == "unparented":
+            return "[?]" if self is ICON_SETS["ascii"] else "?"
         if kind == "jira-project":
             return self.jira_source
         if kind == "epic":
@@ -70,7 +72,7 @@ class IconSet:
 
 ICON_SETS = {
     "ascii": IconSet(
-        project="[P]",
+        project="",
         space="[S]",
         parent_page="[P+]",
         page="",
@@ -83,7 +85,7 @@ ICON_SETS = {
         jira_source="[J]",
     ),
     "unicode": IconSet(
-        project="\u25c9",
+        project="",
         space="\u25a3",
         parent_page="\u25b8",
         page="\u25a1",
@@ -93,10 +95,10 @@ ICON_SETS = {
         source="\u25c9",
         local_source="\u25c7",
         confluence_source="\u25ce",
-        jira_source="\u25c8",
+        jira_source="J",
     ),
     "nerd": IconSet(
-        project="\uf542",
+        project="",
         space="\uf0ac",
         parent_page="\uf07c",
         page="\uf15b",
@@ -106,7 +108,7 @@ ICON_SETS = {
         source="\uf0c2",
         local_source="\uf07b",
         confluence_source="\uf0ac",
-        jira_source="\uf188",
+        jira_source="J",
     ),
 }
 
@@ -385,6 +387,7 @@ class LazylensApp(App[None]):
                 categories = [
                     *categories,
                     *index.jira_epic_structure(source_keys=self.selected_project_source_keys()),
+                    *index.jira_unparented_structure(source_keys=self.selected_project_source_keys()),
                 ]
         category_list = self.query_one("#categories", ListView)
         await category_list.clear()
@@ -632,6 +635,12 @@ class LazylensApp(App[None]):
             self.result_stack.clear()
             await self.show_jira_epic_children(self.selected_source_key)
             return
+        if isinstance(item, CategoryItem) and item.kind == "unparented" and item.category_key:
+            self.history.clear()
+            self.result_stack.clear()
+            source_key = item.category_key.split(":", 1)[0]
+            await self.show_jira_unparented_items(source_key)
+            return
         self.history.clear()
         self.result_stack.clear()
         self.selected_category_key = self.pending_category_key
@@ -711,6 +720,11 @@ class LazylensApp(App[None]):
         with Index(self.db_path) as index:
             children = index.jira_epic_children(source_key=source_key)
         await self.replace_results(children, empty_message="No Epic child tickets indexed for this Jira source")
+
+    async def show_jira_unparented_items(self, source_key: str) -> None:
+        with Index(self.db_path) as index:
+            items = index.jira_unparented_items(source_key=source_key)
+        await self.replace_results(items, empty_message="No unparented Jira tickets indexed for this source")
 
     async def show_context_result(self, result: SearchResult, *, push_history: bool = True) -> None:
         if push_history:

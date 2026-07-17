@@ -511,7 +511,8 @@ class Index:
             )
             for row in rows
         ]
-        return [root, *epics]
+        unparented = self.jira_unparented_structure(source_keys=[source_key])
+        return [root, *epics, *unparented]
 
     def jira_epic_structure(self, *, source_keys: Iterable[str]) -> list[CategorySummary]:
         project_source_keys = sorted(set(source_keys))
@@ -551,6 +552,48 @@ class Index:
             for row in rows
         ]
 
+    def jira_unparented_structure(self, *, source_keys: Iterable[str]) -> list[CategorySummary]:
+        project_source_keys = sorted(set(source_keys))
+        if not project_source_keys:
+            return []
+        placeholders = ", ".join("?" for _source_key in project_source_keys)
+        rows = self.connection.execute(
+            f"""
+            SELECT items.source_key,
+                   sources.name,
+                   COUNT(items.id) AS count
+            FROM items
+            JOIN sources ON sources.key = items.source_key
+            WHERE items.source_key IN ({placeholders})
+              AND sources.type = 'jira'
+              AND items.structure_type = 'page'
+              AND LOWER(items.snippet) NOT LIKE 'epic%'
+              AND (
+                    items.parent_key = ''
+                 OR NOT EXISTS (
+                        SELECT 1
+                        FROM items AS epic
+                        WHERE epic.source_key = items.source_key
+                          AND epic.item_key = items.parent_key
+                          AND epic.structure_type = 'page'
+                          AND LOWER(epic.snippet) LIKE 'epic%'
+                    )
+              )
+            GROUP BY items.source_key, sources.name
+            ORDER BY sources.name COLLATE NOCASE
+            """,
+            tuple(project_source_keys),
+        ).fetchall()
+        return [
+            CategorySummary(
+                key=f"{row['source_key']}:unparented",
+                name="Unparented" if len(rows) == 1 else f"Unparented - {row['name']}",
+                count=int(row["count"]),
+                kind="unparented",
+            )
+            for row in rows
+        ]
+
     def jira_epic_children(self, *, source_key: str) -> list[SearchResult]:
         rows = self.connection.execute(
             """
@@ -564,6 +607,33 @@ class Index:
             WHERE child.source_key = ?
               AND child.structure_type = 'page'
             ORDER BY child.title COLLATE NOCASE
+            """,
+            (source_key,),
+        ).fetchall()
+        return [search_result_from_row(row) for row in rows]
+
+    def jira_unparented_items(self, *, source_key: str) -> list[SearchResult]:
+        rows = self.connection.execute(
+            """
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            JOIN sources ON sources.key = items.source_key
+            WHERE items.source_key = ?
+              AND sources.type = 'jira'
+              AND items.structure_type = 'page'
+              AND LOWER(items.snippet) NOT LIKE 'epic%'
+              AND (
+                    items.parent_key = ''
+                 OR NOT EXISTS (
+                        SELECT 1
+                        FROM items AS epic
+                        WHERE epic.source_key = items.source_key
+                          AND epic.item_key = items.parent_key
+                          AND epic.structure_type = 'page'
+                          AND LOWER(epic.snippet) LIKE 'epic%'
+                    )
+              )
+            ORDER BY items.title COLLATE NOCASE
             """,
             (source_key,),
         ).fetchall()

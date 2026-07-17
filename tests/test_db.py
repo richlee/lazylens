@@ -23,6 +23,19 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         container="architecture",
         snippet="High level design.",
     )
+    decision = IndexedItem(
+        source_key="local",
+        item_key="655361",
+        title="KDD-002 - API Refresh, Local Search",
+        url="https://example.atlassian.net/wiki/spaces/ARCH/pages/655361/KDD-002+-+API+Refresh+Local+Search",
+        path="ARCH/KDD-002",
+        content_type="text/html",
+        modified_at="2026-07-16T13:30:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="API refresh should update the local index.",
+    )
     item = IndexedItem(
         source_key="local",
         item_key="architecture.md",
@@ -35,18 +48,22 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         category="Architecture",
         container="architecture",
         snippet="Useful context about SharePoint and Confluence indexing.",
-        links=("file:///hld.md",),
+        links=(
+            "file:///hld.md",
+            "https://example.atlassian.net/wiki/spaces/ARCH/pages/655361/KDD-002+-+API+Refresh%2C+Local+Search",
+        ),
     )
 
     with Index(db_path) as index:
         index.upsert_source(source)
-        assert index.upsert_items([target, item]) == 2
+        assert index.upsert_items([target, decision, item]) == 3
         results = index.search("SharePoint")
         prefix_results = index.search("Arch")
         multi_prefix_results = index.search("Share Conf")
         punctuation_results = index.search("SharePoint?")
         related = index.related_items(results[0].id)
         hld = index.search("HLD")[0]
+        decision_result = index.search("Refresh")[0]
         inbound = index.related_items(hld.id)
         outgoing = index.outgoing_links(results[0].id)
         incoming = index.incoming_links(hld.id)
@@ -66,6 +83,8 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert inbound[0].direction == "Linked from"
     assert inbound[0].title == "Architecture Notes"
     assert outgoing[0].title == "HLD"
+    assert outgoing[1].title == "KDD-002 - API Refresh, Local Search"
+    assert outgoing[1].item_id == decision_result.id
     assert incoming[0].title == "Architecture Notes"
     assert fetched is not None
     assert fetched.title == "HLD"
@@ -75,9 +94,9 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         categories = index.categories(source_key="local")
 
     assert sources[0].name == "Local"
-    assert sources[0].count == 2
+    assert sources[0].count == 3
     assert categories[0].name == "Architecture"
-    assert categories[0].count == 2
+    assert categories[0].count == 3
 
 
 def test_index_migrates_existing_database(tmp_path: Path) -> None:

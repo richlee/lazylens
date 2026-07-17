@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from lazylens.models import CategorySummary, IndexedItem, RelatedItem, SearchResult, SourceConfig, SourceSummary
 from lazylens.paths import default_db_path
@@ -267,60 +269,7 @@ class Index:
         ]
 
     def related_items(self, item_id: int, *, limit: int = 12) -> list[RelatedItem]:
-        item = self.connection.execute(
-            "SELECT source_key, item_key, url FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
-        if item is None:
-            return []
-        rows = self.connection.execute(
-            """
-            SELECT 'Links to' AS direction,
-                   target.id AS item_id,
-                   COALESCE(target.title, item_links.target_url) AS title,
-                   item_links.target_url AS url,
-                   0 AS sort_order
-            FROM item_links
-            LEFT JOIN items AS target
-              ON target.source_key = item_links.source_key
-             AND target.url = item_links.target_url
-            WHERE item_links.source_key = ?
-              AND item_links.from_item_key = ?
-
-            UNION ALL
-
-            SELECT 'Linked from' AS direction,
-                   source.id AS item_id,
-                   source.title AS title,
-                   source.url AS url,
-                   1 AS sort_order
-            FROM item_links
-            JOIN items AS source
-              ON source.source_key = item_links.source_key
-             AND source.item_key = item_links.from_item_key
-            WHERE item_links.source_key = ?
-              AND item_links.target_url = ?
-
-            ORDER BY sort_order, title COLLATE NOCASE
-            LIMIT ?
-            """,
-            (
-                str(item["source_key"]),
-                str(item["item_key"]),
-                str(item["source_key"]),
-                str(item["url"]),
-                limit,
-            ),
-        ).fetchall()
-        return [
-            RelatedItem(
-                item_id=int(row["item_id"]) if row["item_id"] is not None else None,
-                direction=str(row["direction"]),
-                title=str(row["title"]),
-                url=str(row["url"]),
-            )
-            for row in rows
-        ]
+        return [*self.outgoing_links(item_id, limit=limit), *self.incoming_links(item_id, limit=limit)][:limit]
 
     def outgoing_links(self, item_id: int, *, limit: int = 50) -> list[RelatedItem]:
         item = self.connection.execute(
@@ -329,30 +278,21 @@ class Index:
         ).fetchone()
         if item is None:
             return []
-        rows = self.connection.execute(
+        link_rows = self.connection.execute(
             """
-            SELECT target.id AS item_id,
-                   COALESCE(target.title, item_links.target_url) AS title,
-                   item_links.target_url AS url
+            SELECT target_url
             FROM item_links
-            LEFT JOIN items AS target
-              ON target.source_key = item_links.source_key
-             AND target.url = item_links.target_url
             WHERE item_links.source_key = ?
               AND item_links.from_item_key = ?
-            ORDER BY title COLLATE NOCASE
+            ORDER BY target_url COLLATE NOCASE
             LIMIT ?
             """,
             (str(item["source_key"]), str(item["item_key"]), limit),
         ).fetchall()
+        target_lookup = self.item_lookup(str(item["source_key"]))
         return [
-            RelatedItem(
-                item_id=int(row["item_id"]) if row["item_id"] is not None else None,
-                direction="Links to",
-                title=str(row["title"]),
-                url=str(row["url"]),
-            )
-            for row in rows
+            related_item_from_target_url(str(row["target_url"]), "Links to", target_lookup)
+            for row in link_rows
         ]
 
     def incoming_links(self, item_id: int, *, limit: int = 50) -> list[RelatedItem]:
@@ -362,31 +302,49 @@ class Index:
         ).fetchone()
         if item is None:
             return []
+        target_key = relationship_url_key(str(item["url"]))
+        link_rows = self.connection.execute(
+            """
+            SELECT from_item_key, target_url
+            FROM item_links
+            WHERE item_links.source_key = ?
+            ORDER BY target_url COLLATE NOCASE
+            """,
+            (str(item["source_key"]),),
+        ).fetchall()
+        source_lookup = self.item_lookup(str(item["source_key"]))
+        related = []
+        for row in link_rows:
+            if relationship_url_key(str(row["target_url"])) != target_key:
+                continue
+            source_item = source_lookup.by_item_key.get(str(row["from_item_key"]))
+            if source_item is None:
+                continue
+            related.append(
+                RelatedItem(
+                    item_id=source_item.id,
+                    direction="Linked from",
+                    title=source_item.title,
+                    url=source_item.url,
+                )
+            )
+        return sorted(related, key=lambda item: item.title.lower())[:limit]
+
+    def item_lookup(self, source_key: str) -> ItemLookup:
         rows = self.connection.execute(
             """
-            SELECT source.id AS item_id,
-                   source.title AS title,
-                   source.url AS url
-            FROM item_links
-            JOIN items AS source
-              ON source.source_key = item_links.source_key
-             AND source.item_key = item_links.from_item_key
-            WHERE item_links.source_key = ?
-              AND item_links.target_url = ?
-            ORDER BY source.title COLLATE NOCASE
-            LIMIT ?
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            WHERE source_key = ?
             """,
-            (str(item["source_key"]), str(item["url"]), limit),
+            (source_key,),
         ).fetchall()
-        return [
-            RelatedItem(
-                item_id=int(row["item_id"]),
-                direction="Linked from",
-                title=str(row["title"]),
-                url=str(row["url"]),
-            )
-            for row in rows
-        ]
+        pairs = [(str(row["item_key"]), search_result_from_row(row)) for row in rows]
+        return ItemLookup(
+            by_item_key={item_key: item for item_key, item in pairs},
+            by_url={item.url: item for _item_key, item in pairs},
+            by_relationship_key={relationship_url_key(item.url): item for _item_key, item in pairs},
+        )
 
     def _migrate(self) -> None:
         columns = {
@@ -450,3 +408,29 @@ def search_result_from_row(row: sqlite3.Row) -> SearchResult:
         snippet=str(row["snippet"]),
         rank=float(row["rank"]),
     )
+
+
+@dataclass(frozen=True)
+class ItemLookup:
+    by_item_key: dict[str, SearchResult]
+    by_url: dict[str, SearchResult]
+    by_relationship_key: dict[str, SearchResult]
+
+
+def related_item_from_target_url(target_url: str, direction: str, lookup: ItemLookup) -> RelatedItem:
+    target = lookup.by_url.get(target_url) or lookup.by_relationship_key.get(relationship_url_key(target_url))
+    return RelatedItem(
+        item_id=target.id if target else None,
+        direction=direction,
+        title=target.title if target else target_url,
+        url=target.url if target else target_url,
+    )
+
+
+def relationship_url_key(url: str) -> str:
+    parsed = urlparse(url)
+    path = unquote(parsed.path)
+    match = re.search(r"/spaces/([^/]+)/pages/(\d+)(?:/|$)", path)
+    if match:
+        return f"{parsed.scheme}://{parsed.netloc}/spaces/{match.group(1)}/pages/{match.group(2)}"
+    return unquote(url)

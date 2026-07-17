@@ -98,7 +98,7 @@ class LazylensApp(App[None]):
     }
 
     #preview {
-        height: 10;
+        height: 14;
         border: solid #7a808b;
         padding: 0 1 1 1;
         color: #d7d4ca;

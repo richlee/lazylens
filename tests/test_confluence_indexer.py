@@ -8,6 +8,7 @@ from lazylens.indexers.confluence import (
     ConfluenceError,
     confluence_base_url,
     html_links,
+    html_snippet,
     html_to_text,
     iter_confluence_items,
 )
@@ -42,7 +43,9 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
                         "body": {
                             "storage": {
                                 "value": (
-                                    '<h1>API Decision</h1><p>Use a managed gateway.</p>'
+                                    "<p>Document type</p><p>Decision record</p><p>Status</p><p>Candidate</p>"
+                                    "<p>Use a managed gateway because the team needs consistent authentication, "
+                                    "routing, and observability before service ownership becomes more distributed.</p>"
                                     '<p><a href="/wiki/spaces/ARCH/pages/789/HLD">HLD</a></p>'
                                 )
                             }
@@ -66,7 +69,10 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
     assert items[0].url == "https://example.atlassian.net/wiki/spaces/ARCH/pages/456/API+Decision"
     assert items[0].category == "ARCH"
     assert items[0].container == "Architecture"
-    assert items[0].snippet == "API Decision Use a managed gateway. HLD"
+    assert items[0].snippet == (
+        "Use a managed gateway because the team needs consistent authentication, routing, and observability before "
+        "service ownership becomes more distributed."
+    )
     assert items[0].links == ("https://example.atlassian.net/wiki/spaces/ARCH/pages/789/HLD",)
 
 
@@ -124,6 +130,20 @@ def test_html_links_normalises_confluence_urls() -> None:
         "https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD",
         "https://example.atlassian.net/wiki/spaces/ARCH/pages/456/LLD",
     ]
+
+
+def test_html_snippet_selects_useful_paragraph() -> None:
+    html = (
+        "<p>Document type</p><p>Product page</p><p>Status</p><p>Candidate</p>"
+        "<h1>Product page</h1>"
+        "<p>lazylens is a local-first document landscape explorer for work knowledge across Confluence, SharePoint, "
+        "and local folders.</p>"
+    )
+
+    assert html_snippet(html) == (
+        "lazylens is a local-first document landscape explorer for work knowledge across Confluence, SharePoint, "
+        "and local folders."
+    )
 
 
 def test_confluence_base_url_accepts_site_root_or_wiki_url() -> None:

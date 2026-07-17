@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -11,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
-from lazylens.extract import compact_text
+from lazylens.extract import compact_text, useful_snippet
 from lazylens.models import IndexedItem, SourceConfig
 from lazylens.paths import default_confluence_env_path
 
@@ -49,6 +50,53 @@ class LinkExtractor(HTMLParser):
         href = attributes.get("href")
         if href:
             self.links.append(href)
+
+
+class BlockExtractor(HTMLParser):
+    BLOCK_TAGS = {
+        "article",
+        "blockquote",
+        "br",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "ol",
+        "p",
+        "section",
+        "table",
+        "td",
+        "th",
+        "tr",
+        "ul",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        stripped = data.strip()
+        if stripped:
+            self.parts.append(stripped)
+
+    def text(self) -> str:
+        raw = " ".join(self.parts)
+        raw = re.sub(r" *\n *", "\n", raw)
+        raw = re.sub(r"\n{3,}", "\n\n", raw)
+        return raw.strip()
 
 
 def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | None = None) -> list[IndexedItem]:
@@ -142,6 +190,7 @@ def confluence_page_to_item(
     storage = page.get("body", {}).get("storage", {}) if isinstance(page.get("body"), dict) else {}
     storage_value = str(storage.get("value", "")) if isinstance(storage, dict) else ""
     text = html_to_text(storage_value)
+    snippet = html_snippet(storage_value)
     page_links = html_links(storage_value, base_url)
     version = page.get("version", {}) if isinstance(page.get("version"), dict) else {}
     modified_at = str(version.get("createdAt") or page.get("createdAt") or datetime.now(timezone.utc).isoformat())
@@ -157,7 +206,7 @@ def confluence_page_to_item(
         owner=str(page.get("ownerId") or page.get("authorId") or ""),
         category=category,
         container=space.get("name", category),
-        snippet=text[:500],
+        snippet=snippet,
         links=tuple(page_links),
     )
 
@@ -208,6 +257,12 @@ def html_to_text(value: str) -> str:
     parser = TextExtractor()
     parser.feed(value)
     return parser.text()
+
+
+def html_snippet(value: str, *, limit: int = 1_200) -> str:
+    parser = BlockExtractor()
+    parser.feed(value)
+    return useful_snippet(parser.text(), limit=limit)
 
 
 def html_links(value: str, base_url: str) -> list[str]:

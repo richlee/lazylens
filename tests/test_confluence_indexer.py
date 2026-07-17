@@ -11,8 +11,9 @@ from lazylens.indexers.confluence import (
     html_snippet,
     html_to_text,
     iter_confluence_items,
+    iter_confluence_refresh,
 )
-from lazylens.models import SourceConfig
+from lazylens.models import SearchResult, SourceConfig
 
 
 def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,6 +194,72 @@ def test_iter_confluence_items_supports_custom_token_env(monkeypatch: pytest.Mon
         return {"results": []}
 
     assert iter_confluence_items(source, fetch_json=fetch_json) == []
+
+
+def test_iter_confluence_refresh_skips_body_fetch_for_unchanged_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = SourceConfig(
+        key="work",
+        name="Work Confluence",
+        type="confluence",
+        settings={
+            "space_keys": ["ARCH"],
+        },
+    )
+    existing = SearchResult(
+        id=1,
+        source_key="work",
+        item_key="456",
+        title="API Decision",
+        url="https://example.atlassian.net/wiki/spaces/ARCH/pages/456/API+Decision",
+        path="ARCH/API Decision",
+        content_type="text/html",
+        modified_at="2026-07-16T12:00:00.000Z",
+        owner="abc",
+        category="API Decision",
+        container="Architecture",
+        snippet="Previously indexed context.",
+        rank=0.0,
+        parent_key="",
+        structure_type="page",
+    )
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.atlassian.net/wiki")
+    monkeypatch.setenv("CONFLUENCE_EMAIL", "rich@example.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "secret")
+    calls: list[dict[str, Any]] = []
+
+    def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
+        calls.append(request)
+        if request["path"] == "/api/v2/spaces":
+            return {"results": [{"id": "123", "key": "ARCH", "name": "Architecture", "homepageId": "100"}]}
+        if request["path"] == "/api/v2/pages":
+            assert "body-format" not in request["params"]
+            return {
+                "results": [
+                    {
+                        "id": "456",
+                        "title": "API Decision",
+                        "parentId": None,
+                        "_links": {"webui": "/spaces/ARCH/pages/456/API+Decision"},
+                        "version": {"createdAt": "2026-07-16T12:00:00.000Z"},
+                        "ownerId": "abc",
+                    }
+                ],
+                "_links": {},
+            }
+        if request["path"].endswith("/direct-children"):
+            return {"results": []}
+        raise AssertionError(f"Unexpected body fetch: {request}")
+
+    items, seen_item_keys, unchanged = iter_confluence_refresh(
+        source,
+        existing_items={"456": existing},
+        fetch_json=fetch_json,
+    )
+
+    assert items == []
+    assert seen_item_keys == {"456"}
+    assert unchanged == 1
+    assert all(request["path"] != "/api/v2/pages/456" for request in calls)
 
 
 def test_html_to_text_compacts_storage_html() -> None:

@@ -161,6 +161,74 @@ class Index:
         self.connection.commit()
         return count
 
+    def items_by_source(self, source_key: str) -> dict[str, SearchResult]:
+        rows = self.connection.execute(
+            """
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            WHERE source_key = ?
+            """,
+            (source_key,),
+        ).fetchall()
+        return {str(row["item_key"]): search_result_from_row(row) for row in rows}
+
+    def delete_source_items(self, source_key: str, item_keys: Iterable[str]) -> int:
+        keys = sorted(set(item_keys))
+        if not keys:
+            return 0
+
+        total = 0
+        for index in range(0, len(keys), 400):
+            total += self._delete_source_items_batch(source_key, keys[index:index + 400])
+        return total
+
+    def _delete_source_items_batch(self, source_key: str, keys: list[str]) -> int:
+        if not keys:
+            return 0
+
+        placeholders = ", ".join("?" for _key in keys)
+        rows = self.connection.execute(
+            f"""
+            SELECT id, item_key
+            FROM items
+            WHERE source_key = ?
+              AND item_key IN ({placeholders})
+            """,
+            (source_key, *keys),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        item_ids = [int(row["id"]) for row in rows]
+        existing_keys = [str(row["item_key"]) for row in rows]
+        id_placeholders = ", ".join("?" for _item_id in item_ids)
+        key_placeholders = ", ".join("?" for _key in existing_keys)
+
+        self.connection.execute(f"DELETE FROM item_fts WHERE item_id IN ({id_placeholders})", item_ids)
+        self.connection.execute(
+            f"""
+            DELETE FROM item_links
+            WHERE source_key = ?
+              AND from_item_key IN ({key_placeholders})
+            """,
+            (source_key, *existing_keys),
+        )
+        self.connection.execute(
+            f"""
+            DELETE FROM items
+            WHERE source_key = ?
+              AND item_key IN ({key_placeholders})
+            """,
+            (source_key, *existing_keys),
+        )
+        self.connection.commit()
+        return len(existing_keys)
+
+    def delete_source_items_not_seen(self, source_key: str, seen_item_keys: Iterable[str]) -> int:
+        existing = set(self.items_by_source(source_key))
+        seen = set(seen_item_keys)
+        return self.delete_source_items(source_key, existing - seen)
+
     def search(
         self,
         query: str,

@@ -17,7 +17,8 @@ from textual.widgets import Header, Input, Label, ListItem, ListView, Static
 
 from lazylens.config import configured_db_path, load_sources, load_ui_config
 from lazylens.db import Index
-from lazylens.indexers.adapters import IndexingError, iter_source_items
+from lazylens.indexers.adapters import IndexingError
+from lazylens.indexing import refresh_source
 from lazylens.models import CategorySummary, RelatedItem, SearchResult, SourceConfig, SourceSummary, UiConfig
 from lazylens.paths import default_config_path
 
@@ -421,18 +422,23 @@ class LazylensApp(App[None]):
             outgoing_list.index = None
 
     async def action_refresh_index(self) -> None:
-        indexed = 0
+        changed = 0
+        unchanged = 0
+        removed = 0
         skipped = 0
         with Index(self.db_path) as index:
             for source in self.configured_sources:
                 try:
-                    index.upsert_source(source)
-                    indexed += index.upsert_items(iter_source_items(source))
+                    report = refresh_source(index, source)
                 except (IndexingError, RuntimeError, OSError):
                     skipped += 1
                     continue
+                changed += report.changed
+                unchanged += report.unchanged
+                removed += report.removed
         await self.reload_from_db()
-        self.notify(f"Indexed {indexed} items" + (f"; skipped {skipped} source(s)" if skipped else ""))
+        message = f"Indexed {changed} changed, skipped {unchanged} unchanged, removed {removed}"
+        self.notify(message + (f"; skipped {skipped} source(s)" if skipped else ""))
 
     async def action_open_selected(self) -> None:
         focused = self.focused

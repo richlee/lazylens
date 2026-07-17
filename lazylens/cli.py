@@ -8,7 +8,8 @@ from pathlib import Path
 
 from lazylens.config import configured_db_path, load_sources
 from lazylens.db import Index
-from lazylens.indexers.adapters import IndexingError, iter_source_items
+from lazylens.indexers.adapters import IndexingError
+from lazylens.indexing import IndexReport, refresh_source
 from lazylens.models import SourceConfig
 from lazylens.paths import data_home, default_config_path, default_confluence_env_path, default_db_path
 
@@ -34,9 +35,8 @@ Run lazylens index after changing configured local folders. Later versions shoul
 }
 
 
-def index_source(index: Index, source: SourceConfig) -> int:
-    index.upsert_source(source)
-    return index.upsert_items(iter_source_items(source))
+def render_index_report(report: IndexReport) -> str:
+    return f"{report.changed} items ({report.unchanged} unchanged, {report.removed} removed)"
 
 
 def render_config(*, database: Path, key: str, name: str, root: Path) -> str:
@@ -189,12 +189,12 @@ def command_index(args: argparse.Namespace) -> int:
         failed = False
         for source in selected:
             try:
-                count = index_source(index, source)
+                report = refresh_source(index, source)
             except (IndexingError, RuntimeError, OSError) as exc:
                 failed = True
                 print(f"Index failed for {source.name}: {exc}", file=sys.stderr)
                 continue
-            print(f"Indexed {count} items from {source.name} into {index.path}")
+            print(f"Indexed {render_index_report(report)} from {source.name} into {index.path}")
     return 1 if failed else 0
 
 
@@ -265,10 +265,10 @@ def command_demo(args: argparse.Namespace) -> int:
     source = SourceConfig(key="demo", name="Demo Project", type="local", root=demo_root)
     append_demo_source(config_path, source=source, database=database, force=args.force_config)
     with Index(database) as index:
-        count = index_source(index, source)
+        report = refresh_source(index, source)
     print(f"Demo documents: {demo_root}")
     print(f"Config: {config_path}")
-    print(f"Indexed {count} demo items into {database}")
+    print(f"Indexed {render_index_report(report)} into {database}")
     print("Run: lazylens")
     return 0
 

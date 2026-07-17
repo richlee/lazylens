@@ -4,7 +4,7 @@ import base64
 import json
 import os
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
@@ -13,7 +13,7 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
 from lazylens.extract import compact_text, useful_snippet
-from lazylens.models import IndexedItem, SourceConfig
+from lazylens.models import IndexedItem, SearchResult, SourceConfig
 from lazylens.paths import default_confluence_env_path
 
 
@@ -100,6 +100,16 @@ class BlockExtractor(HTMLParser):
 
 
 def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | None = None) -> list[IndexedItem]:
+    items, _seen_item_keys, _unchanged = iter_confluence_refresh(source, fetch_json=fetch_json)
+    return items
+
+
+def iter_confluence_refresh(
+    source: SourceConfig,
+    *,
+    existing_items: Mapping[str, SearchResult] | None = None,
+    fetch_json: JsonFetcher | None = None,
+) -> tuple[list[IndexedItem], set[str], int]:
     base_url = confluence_base_url(confluence_setting(source, "base_url", "CONFLUENCE_BASE_URL"))
     email = confluence_setting(source, "email", "CONFLUENCE_EMAIL")
     api_token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
@@ -111,9 +121,21 @@ def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | Non
     fetcher = fetch_json or fetch_confluence_json
     spaces = resolve_spaces(source, base_url, headers, fetcher)
     items: list[IndexedItem] = []
+    seen_item_keys: set[str] = set()
+    unchanged = 0
     for space in spaces:
-        items.extend(iter_space_pages(source, base_url, headers, fetcher, space))
-    return items
+        space_items, space_seen_item_keys, space_unchanged = iter_space_pages(
+            source,
+            base_url,
+            headers,
+            fetcher,
+            space,
+            existing_items=existing_items,
+        )
+        items.extend(space_items)
+        seen_item_keys.update(space_seen_item_keys)
+        unchanged += space_unchanged
+    return items, seen_item_keys, unchanged
 
 
 def resolve_spaces(
@@ -158,11 +180,14 @@ def iter_space_pages(
     headers: dict[str, str],
     fetch_json: JsonFetcher,
     space: dict[str, str],
-) -> Iterable[IndexedItem]:
+    existing_items: Mapping[str, SearchResult] | None = None,
+) -> tuple[list[IndexedItem], set[str], int]:
     limit = int(source.settings.get("page_limit", 100))
     max_pages = int(source.settings.get("max_pages", 5))
     path = "/api/v2/pages"
-    params: dict[str, Any] = {"space-id": [space["id"]], "body-format": "storage", "limit": limit}
+    params: dict[str, Any] = {"space-id": [space["id"]], "limit": limit}
+    if existing_items is None:
+        params["body-format"] = "storage"
     fetched_pages = 0
     pages: list[dict[str, Any]] = []
 
@@ -179,11 +204,34 @@ def iter_space_pages(
 
     structure_nodes = confluence_structure_nodes(base_url, headers, fetch_json, pages)
     hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")), structure_nodes)
+    items: list[IndexedItem] = []
+    seen_item_keys: set[str] = set()
+    unchanged = 0
     for node in structure_nodes.values():
+        node_id = str(node.get("id", ""))
+        if node_id:
+            seen_item_keys.add(node_id)
         if node.get("type") == "folder":
-            yield confluence_folder_to_item(source, base_url, node, space, hierarchy)
+            item = confluence_folder_to_item(source, base_url, node, space, hierarchy)
+            existing = existing_items.get(item.item_key) if existing_items else None
+            if existing and confluence_metadata_matches(existing, item):
+                unchanged += 1
+            else:
+                items.append(item)
     for page in pages:
-        yield confluence_page_to_item(source, base_url, page, space, hierarchy)
+        page_id = str(page.get("id", ""))
+        if page_id:
+            seen_item_keys.add(page_id)
+        item = confluence_page_to_item(source, base_url, page, space, hierarchy)
+        existing = existing_items.get(item.item_key) if existing_items else None
+        if existing and confluence_metadata_matches(existing, item):
+            unchanged += 1
+            continue
+        if not page_storage_html(page):
+            page = confluence_page_with_body(base_url, headers, fetch_json, page_id)
+            item = confluence_page_to_item(source, base_url, page, space, hierarchy)
+        items.append(item)
+    return items, seen_item_keys, unchanged
 
 
 def confluence_page_to_item(
@@ -200,7 +248,6 @@ def confluence_page_to_item(
     url = confluence_web_url(base_url, webui) if webui else base_url
     storage = page.get("body", {}).get("storage", {}) if isinstance(page.get("body"), dict) else {}
     storage_value = str(storage.get("value", "")) if isinstance(storage, dict) else ""
-    text = html_to_text(storage_value)
     snippet = html_snippet(storage_value)
     page_links = html_links(storage_value, base_url)
     version = page.get("version", {}) if isinstance(page.get("version"), dict) else {}
@@ -253,6 +300,43 @@ def confluence_folder_to_item(
         parent_key=str(folder.get("parentId") or ""),
         structure_type="folder",
     )
+
+
+def confluence_metadata_matches(existing: SearchResult, item: IndexedItem) -> bool:
+    return (
+        existing.title == item.title
+        and existing.url == item.url
+        and existing.path == item.path
+        and existing.content_type == item.content_type
+        and existing.modified_at == item.modified_at
+        and existing.owner == item.owner
+        and existing.category == item.category
+        and existing.container == item.container
+        and existing.parent_key == item.parent_key
+        and existing.structure_type == item.structure_type
+    )
+
+
+def page_storage_html(page: dict[str, Any]) -> str:
+    body = page.get("body", {}) if isinstance(page.get("body"), dict) else {}
+    storage = body.get("storage", {}) if isinstance(body.get("storage"), dict) else {}
+    return str(storage.get("value", "")) if isinstance(storage, dict) else ""
+
+
+def confluence_page_with_body(
+    base_url: str,
+    headers: dict[str, str],
+    fetch_json: JsonFetcher,
+    page_id: str,
+) -> dict[str, Any]:
+    if not page_id:
+        return {}
+    payload = fetch_json(
+        base_url,
+        {"path": f"/api/v2/pages/{page_id}", "params": {"body-format": "storage"}},
+        headers,
+    )
+    return payload if isinstance(payload, dict) else {}
 
 
 def confluence_structure_nodes(

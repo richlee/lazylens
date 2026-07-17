@@ -103,7 +103,7 @@ def test_cli_demo_creates_searchable_demo_source(tmp_path: Path, capsys) -> None
     assert main(["--config", str(config), "search", "SharePoint"]) == 0
 
     output = capsys.readouterr().out
-    assert "Indexed 4 demo items" in output
+    assert "Indexed 4 items" in output
     assert "Platform Overview | demo | Architecture" in output
     assert config.read_text().count('[sources."demo"]') == 1
 
@@ -122,7 +122,7 @@ def test_cli_demo_uses_existing_config_database(tmp_path: Path, capsys) -> None:
     assert main(["--config", str(config), "search", "gateway"]) == 0
 
     output = capsys.readouterr().out
-    assert f"Indexed 4 demo items into {db}" in output
+    assert f"Indexed 4 items (0 unchanged, 0 removed) into {db}" in output
     assert "API Gateway Decision | demo | Architecture" in output
 
 

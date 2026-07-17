@@ -26,10 +26,13 @@ def default_config_path() -> Path:
     return Path(os.environ.get("LAZYLENS_CONFIG", str(config_home() / "config.toml"))).expanduser()
 
 
+def default_confluence_env_path() -> Path:
+    return Path(os.environ.get("LAZYLENS_CONFLUENCE_ENV", str(config_home() / "atlassian.env"))).expanduser()
+
+
 def default_db_path() -> Path:
     return Path(os.environ.get("LAZYLENS_DB", str(data_home() / "index.sqlite3"))).expanduser()
 
 
 def default_cache_dir() -> Path:
     return Path(os.environ.get("LAZYLENS_CACHE", str(cache_home() / "files"))).expanduser()
-

@@ -75,3 +75,30 @@ def test_cli_demo_uses_existing_config_database(tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
     assert f"Indexed 4 demo items into {db}" in output
     assert "API Gateway Decision | demo | Architecture" in output
+
+
+def test_cli_doctor_hints_at_confluence_env_file(tmp_path: Path, capsys, monkeypatch) -> None:
+    config_home = tmp_path / "config-home"
+    config = tmp_path / "config.toml"
+    db = tmp_path / "index.sqlite3"
+    config.write_text(
+        f"""
+database = "{db}"
+
+[sources.personal]
+name = "Personal Confluence"
+type = "confluence"
+space_keys = ["LAZYLENS"]
+"""
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.delenv("CONFLUENCE_BASE_URL", raising=False)
+    monkeypatch.delenv("CONFLUENCE_EMAIL", raising=False)
+    monkeypatch.delenv("CONFLUENCE_API_TOKEN", raising=False)
+
+    assert main(["--config", str(config), "doctor"]) == 0
+
+    output = capsys.readouterr().out
+    env_file = config_home / "lazylens" / "atlassian.env"
+    assert f"Confluence env: {env_file} (not found)" in output
+    assert f"source {env_file}" in output

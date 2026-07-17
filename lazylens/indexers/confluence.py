@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from lazylens.extract import compact_text
 from lazylens.models import IndexedItem, SourceConfig
+from lazylens.paths import default_confluence_env_path
 
 
 JsonFetcher = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
@@ -56,7 +57,7 @@ def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | Non
     api_token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
     api_token = os.environ.get(api_token_env)
     if not api_token:
-        raise ConfluenceError(f"{source.key}: set {api_token_env} with a Confluence API token")
+        raise ConfluenceError(f"{source.key}: missing {api_token_env}. {confluence_env_hint()}")
 
     headers = auth_headers(email, api_token)
     fetcher = fetch_json or fetch_confluence_json
@@ -173,7 +174,7 @@ def fetch_confluence_json(base_url: str, request: dict[str, Any], headers: dict[
         with urlopen(http_request, timeout=30) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raise ConfluenceError(f"Confluence returned HTTP {exc.code} for {url}") from exc
+        raise ConfluenceError(f"Confluence returned HTTP {exc.code} for {url}. {confluence_http_hint(exc.code)}") from exc
     except URLError as exc:
         raise ConfluenceError(f"Confluence request failed for {url}: {exc.reason}") from exc
 
@@ -226,8 +227,26 @@ def html_links(value: str, base_url: str) -> list[str]:
 def confluence_setting(source: SourceConfig, name: str, env_name: str) -> str:
     value = source.settings.get(name) or os.environ.get(env_name)
     if not value:
-        raise ConfluenceError(f"{source.key}: missing {name} or {env_name}")
+        raise ConfluenceError(f"{source.key}: missing {name} or {env_name}. {confluence_env_hint()}")
     return str(value)
+
+
+def confluence_env_hint() -> str:
+    env_file = default_confluence_env_path()
+    if env_file.exists():
+        return f"Set Confluence env vars in this shell, for example: source {env_file}"
+    return f"Set Confluence env vars, or create and source {env_file}"
+
+
+def confluence_http_hint(status_code: int) -> str:
+    if status_code in {401, 403}:
+        return f"Check CONFLUENCE_EMAIL and API token, then source {default_confluence_env_path()}."
+    if status_code == 404:
+        return (
+            "Check CONFLUENCE_BASE_URL, space visibility, and that this shell has loaded the intended env vars. "
+            f"For zsh/bash: source {default_confluence_env_path()}."
+        )
+    return f"Check the Confluence configuration and env vars. For zsh/bash: source {default_confluence_env_path()}."
 
 
 def string_list(value: object) -> list[str]:

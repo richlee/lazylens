@@ -10,7 +10,7 @@ from lazylens.config import configured_db_path, load_sources
 from lazylens.db import Index
 from lazylens.indexers.adapters import IndexingError, iter_source_items
 from lazylens.models import SourceConfig
-from lazylens.paths import data_home, default_config_path, default_db_path
+from lazylens.paths import data_home, default_config_path, default_confluence_env_path, default_db_path
 
 
 DEMO_FILES = {
@@ -166,8 +166,13 @@ def command_search(args: argparse.Namespace) -> int:
 def command_doctor(args: argparse.Namespace) -> int:
     config_path = Path(args.config).expanduser() if args.config else default_config_path()
     db_path = configured_db_path(config_path) if config_path.exists() else default_db_path()
+    confluence_env_path = default_confluence_env_path()
     print(f"Config: {config_path}")
     print(f"Database: {db_path}")
+    print(
+        "Confluence env: "
+        f"{confluence_env_path} ({'exists' if confluence_env_path.exists() else 'not found'})"
+    )
     sources = load_sources(config_path)
     print(f"Sources: {len(sources)} configured")
     for source in sources:
@@ -181,6 +186,8 @@ def command_doctor(args: argparse.Namespace) -> int:
             email = source.settings.get("email") or os.environ.get("CONFLUENCE_EMAIL")
             status = "OK" if base_url and email else "missing config/env"
             status = f"{status}; token env: {token_env} ({token_status})"
+            if status.startswith("missing") or token_status == "missing":
+                status = f"{status}; for zsh/bash run: source {confluence_env_path}"
         else:
             status = "unsupported"
         print(f"  {source.key}: {source.type} | {root} | {status}")

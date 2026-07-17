@@ -397,7 +397,7 @@ class LazylensApp(App[None]):
         category_list.index = 0
         self.selected_category_key = None
         self.pending_category_key = None
-        await self.refresh_primary_view()
+        await self.refresh_results()
 
     async def refresh_results(self, *, highlight_item_id: int | None = None) -> None:
         with Index(self.db_path) as index:
@@ -481,7 +481,7 @@ class LazylensApp(App[None]):
         self.query_text = value.strip()
         self.history.clear()
         self.result_stack.clear()
-        await self.refresh_primary_view()
+        await self.refresh_results()
         self.query_one("#results", ListView).focus()
 
     async def action_clear_search(self) -> None:
@@ -489,7 +489,7 @@ class LazylensApp(App[None]):
         self.result_stack.clear()
         search = self.query_one("#search", Input)
         search.value = ""
-        await self.refresh_primary_view()
+        await self.refresh_results()
         self.query_one("#results", ListView).focus()
 
     async def update_relations(self, result: SearchResult | None) -> None:
@@ -704,12 +704,6 @@ class LazylensApp(App[None]):
         with Index(self.db_path) as index:
             epics = index.jira_epics(source_key=source_key)
         await self.replace_results(epics, empty_message="No Epics indexed for this Jira source")
-
-    async def refresh_primary_view(self) -> None:
-        if self.selected_source_type() == "jira" and not self.query_text and self.selected_source_key:
-            await self.show_jira_epics(self.selected_source_key)
-            return
-        await self.refresh_results()
 
     async def show_context_result(self, result: SearchResult, *, push_history: bool = True) -> None:
         if push_history:

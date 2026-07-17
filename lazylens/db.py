@@ -260,8 +260,17 @@ class Index:
                 f"""
                 SELECT items.*, 0.0 AS rank
                 FROM items
+                JOIN sources ON sources.key = items.source_key
                 {where}
-                ORDER BY modified_at DESC, title COLLATE NOCASE
+                ORDER BY
+                    CASE sources.type
+                        WHEN 'confluence' THEN 0
+                        WHEN 'local' THEN 1
+                        WHEN 'jira' THEN 2
+                        ELSE 3
+                    END,
+                    modified_at DESC,
+                    title COLLATE NOCASE
                 LIMIT ?
                 """,
                 (*params, limit),
@@ -275,8 +284,16 @@ class Index:
                 SELECT items.*, bm25(item_fts) AS rank
                 FROM item_fts
                 JOIN items ON items.id = item_fts.item_id
+                JOIN sources ON sources.key = items.source_key
                 WHERE {' AND '.join(search_filters)}
-                ORDER BY rank
+                ORDER BY
+                    rank,
+                    CASE sources.type
+                        WHEN 'confluence' THEN 0
+                        WHEN 'local' THEN 1
+                        WHEN 'jira' THEN 2
+                        ELSE 3
+                    END
                 LIMIT ?
                 """,
                 (fts_query, *params, limit),

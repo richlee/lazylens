@@ -642,7 +642,11 @@ def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -
             categories = app.query_one("#categories", ListView)
 
             assert [getattr(item, "kind", "") for item in categories.children] == ["jira-project", "epic"]
-            assert [result.title for result in app.results] == ["LAZY-1 - Epic"]
+            assert [result.title for result in app.results] == [
+                "LAZY-1 - Epic",
+                "LAZY-2 - Story",
+                "LAZY-3 - Bug",
+            ]
 
             categories.focus()
             categories.index = 1
@@ -810,6 +814,9 @@ sources = ["dsp-beta", "DSPBeta"]
             await pilot.pause()
 
             assert app.selected_source_key == "DSPBeta"
-            assert app.results == []
+            assert [result.title for result in app.results] == [
+                "DSP LLD",
+                "DSPBeta-1 - Build relationship view",
+            ]
 
     asyncio.run(run_app())

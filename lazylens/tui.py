@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -43,7 +46,7 @@ class LazylensApp(App[None]):
         Binding("shift+tab", "focus_previous_pane", "Previous Pane", show=False, priority=True),
         Binding("c", "clear_search", "Clear Search", show=False),
         Binding("r", "refresh_index", "Refresh", show=False),
-        Binding("enter", "open_selected", "Open", show=False),
+        Binding("enter", "open_selected", "Open", show=False, priority=True),
         Binding("q", "quit", "Quit", show=False),
         Binding("1", "select_source(1)", "Source 1", show=False),
         Binding("2", "select_source(2)", "Source 2", show=False),
@@ -220,6 +223,11 @@ class LazylensApp(App[None]):
             "",
             result.snippet or "(no preview text available)",
         ]
+        with Index(self.db_path) as index:
+            related = index.related_items(result.id)
+        if related:
+            lines.extend(["", "Related:"])
+            lines.extend(f"{item.direction}: {item.title}" for item in related)
         preview.update(Text("\n".join(lines)))
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -280,8 +288,10 @@ class LazylensApp(App[None]):
         if result is None:
             self.notify("No result selected", severity="warning")
             return
-        webbrowser.open(result.url)
-        self.notify(f"Opened {result.title}")
+        if open_url(result.url):
+            self.notify(f"Opened {result.title}")
+            return
+        self.notify(f"Could not open {result.url}", severity="error")
 
     async def action_select_source(self, number: int) -> None:
         index = number - 1
@@ -335,3 +345,21 @@ class LazylensApp(App[None]):
 def run_tui(config_path: str | Path | None = None, db_path: str | Path | None = None) -> int:
     LazylensApp(config_path=config_path, db_path=db_path).run()
     return 0
+
+
+def open_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", url])
+            return True
+        if os.name == "nt":
+            os.startfile(url)  # type: ignore[attr-defined]
+            return True
+        if sys.platform.startswith("linux"):
+            subprocess.Popen(["xdg-open", url])
+            return True
+    except OSError:
+        pass
+    return webbrowser.open(url, new=2)

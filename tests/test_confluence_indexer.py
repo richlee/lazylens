@@ -4,7 +4,13 @@ from typing import Any
 
 import pytest
 
-from lazylens.indexers.confluence import ConfluenceError, confluence_base_url, html_to_text, iter_confluence_items
+from lazylens.indexers.confluence import (
+    ConfluenceError,
+    confluence_base_url,
+    html_links,
+    html_to_text,
+    iter_confluence_items,
+)
 from lazylens.models import SourceConfig
 
 
@@ -33,7 +39,14 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
                         "id": "456",
                         "title": "API Decision",
                         "_links": {"webui": "/spaces/ARCH/pages/456/API+Decision"},
-                        "body": {"storage": {"value": "<h1>API Decision</h1><p>Use a managed gateway.</p>"}},
+                        "body": {
+                            "storage": {
+                                "value": (
+                                    '<h1>API Decision</h1><p>Use a managed gateway.</p>'
+                                    '<p><a href="/wiki/spaces/ARCH/pages/789/HLD">HLD</a></p>'
+                                )
+                            }
+                        },
                         "version": {"createdAt": "2026-07-16T12:00:00.000Z"},
                         "ownerId": "abc",
                     }
@@ -53,7 +66,8 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
     assert items[0].url == "https://example.atlassian.net/wiki/spaces/ARCH/pages/456/API+Decision"
     assert items[0].category == "ARCH"
     assert items[0].container == "Architecture"
-    assert items[0].snippet == "API Decision Use a managed gateway."
+    assert items[0].snippet == "API Decision Use a managed gateway. HLD"
+    assert items[0].links == ("https://example.atlassian.net/wiki/spaces/ARCH/pages/789/HLD",)
 
 
 def test_iter_confluence_items_requires_default_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +110,20 @@ def test_iter_confluence_items_supports_custom_token_env(monkeypatch: pytest.Mon
 
 def test_html_to_text_compacts_storage_html() -> None:
     assert html_to_text("<h1>Title</h1><p> Useful <strong>context</strong>.</p>") == "Title Useful context ."
+
+
+def test_html_links_normalises_confluence_urls() -> None:
+    links = html_links(
+        '<a href="/wiki/spaces/ARCH/pages/123/HLD">HLD</a>'
+        '<a href="/spaces/ARCH/pages/456/LLD">LLD</a>'
+        '<a href="/wiki/spaces/ARCH/pages/123/HLD">HLD again</a>',
+        "https://example.atlassian.net/wiki",
+    )
+
+    assert links == [
+        "https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD",
+        "https://example.atlassian.net/wiki/spaces/ARCH/pages/456/LLD",
+    ]
 
 
 def test_confluence_base_url_accepts_site_root_or_wiki_url() -> None:

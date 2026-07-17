@@ -36,6 +36,20 @@ class TextExtractor(HTMLParser):
         return compact_text(" ".join(self.parts))
 
 
+class LinkExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+        attributes = dict(attrs)
+        href = attributes.get("href")
+        if href:
+            self.links.append(href)
+
+
 def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | None = None) -> list[IndexedItem]:
     base_url = confluence_base_url(confluence_setting(source, "base_url", "CONFLUENCE_BASE_URL"))
     email = confluence_setting(source, "email", "CONFLUENCE_EMAIL")
@@ -123,10 +137,11 @@ def confluence_page_to_item(
     title = str(page.get("title", page_id or "Untitled"))
     links = page.get("_links", {}) if isinstance(page.get("_links"), dict) else {}
     webui = str(links.get("webui", ""))
-    url = urljoin(base_url.rstrip("/") + "/", webui.lstrip("/")) if webui else base_url
+    url = confluence_web_url(base_url, webui) if webui else base_url
     storage = page.get("body", {}).get("storage", {}) if isinstance(page.get("body"), dict) else {}
     storage_value = str(storage.get("value", "")) if isinstance(storage, dict) else ""
     text = html_to_text(storage_value)
+    page_links = html_links(storage_value, base_url)
     version = page.get("version", {}) if isinstance(page.get("version"), dict) else {}
     modified_at = str(version.get("createdAt") or page.get("createdAt") or datetime.now(timezone.utc).isoformat())
     category = space.get("key") or space.get("name") or "Confluence"
@@ -142,6 +157,7 @@ def confluence_page_to_item(
         category=category,
         container=space.get("name", category),
         snippet=text[:500],
+        links=tuple(page_links),
     )
 
 
@@ -176,6 +192,12 @@ def api_url(base_url: str, path: str) -> str:
     return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
 
 
+def confluence_web_url(base_url: str, path: str) -> str:
+    if base_url.rstrip("/").endswith("/wiki") and path.startswith("/wiki/"):
+        path = path.removeprefix("/wiki")
+    return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+
+
 def confluence_base_url(value: str) -> str:
     url = value.rstrip("/")
     return url if url.endswith("/wiki") else f"{url}/wiki"
@@ -185,6 +207,20 @@ def html_to_text(value: str) -> str:
     parser = TextExtractor()
     parser.feed(value)
     return parser.text()
+
+
+def html_links(value: str, base_url: str) -> list[str]:
+    parser = LinkExtractor()
+    parser.feed(value)
+    seen = set()
+    links = []
+    for link in parser.links:
+        absolute_url = confluence_web_url(base_url, link)
+        if absolute_url in seen:
+            continue
+        seen.add(absolute_url)
+        links.append(absolute_url)
+    return links
 
 
 def confluence_setting(source: SourceConfig, name: str, env_name: str) -> str:

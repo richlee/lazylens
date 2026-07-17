@@ -5,7 +5,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from lazylens.models import CategorySummary, IndexedItem, SearchResult, SourceConfig, SourceSummary
+from lazylens.models import CategorySummary, IndexedItem, RelatedItem, SearchResult, SourceConfig, SourceSummary
 from lazylens.paths import default_db_path
 
 
@@ -43,6 +43,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS item_fts USING fts5(
     category,
     path,
     item_id UNINDEXED
+);
+
+CREATE TABLE IF NOT EXISTS item_links (
+    id INTEGER PRIMARY KEY,
+    source_key TEXT NOT NULL,
+    from_item_key TEXT NOT NULL,
+    target_url TEXT NOT NULL,
+    UNIQUE(source_key, from_item_key, target_url)
 );
 """
 
@@ -126,6 +134,18 @@ class Index:
             self.connection.execute(
                 "INSERT INTO item_fts (title, snippet, category, path, item_id) VALUES (?, ?, ?, ?, ?)",
                 (item.title, item.snippet, item.category, item.path, item_id),
+            )
+            self.connection.execute(
+                "DELETE FROM item_links WHERE source_key = ? AND from_item_key = ?",
+                (item.source_key, item.item_key),
+            )
+            self.connection.executemany(
+                """
+                INSERT INTO item_links (source_key, from_item_key, target_url)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source_key, from_item_key, target_url) DO NOTHING
+                """,
+                [(item.source_key, item.item_key, link) for link in item.links if link],
             )
             count += 1
         self.connection.commit()
@@ -248,6 +268,55 @@ class Index:
             for row in rows
         ]
 
+    def related_items(self, item_id: int, *, limit: int = 12) -> list[RelatedItem]:
+        item = self.connection.execute(
+            "SELECT source_key, item_key, url FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        if item is None:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT 'Links to' AS direction,
+                   COALESCE(target.title, item_links.target_url) AS title,
+                   item_links.target_url AS url,
+                   0 AS sort_order
+            FROM item_links
+            LEFT JOIN items AS target
+              ON target.source_key = item_links.source_key
+             AND target.url = item_links.target_url
+            WHERE item_links.source_key = ?
+              AND item_links.from_item_key = ?
+
+            UNION ALL
+
+            SELECT 'Linked from' AS direction,
+                   source.title AS title,
+                   source.url AS url,
+                   1 AS sort_order
+            FROM item_links
+            JOIN items AS source
+              ON source.source_key = item_links.source_key
+             AND source.item_key = item_links.from_item_key
+            WHERE item_links.source_key = ?
+              AND item_links.target_url = ?
+
+            ORDER BY sort_order, title COLLATE NOCASE
+            LIMIT ?
+            """,
+            (
+                str(item["source_key"]),
+                str(item["item_key"]),
+                str(item["source_key"]),
+                str(item["url"]),
+                limit,
+            ),
+        ).fetchall()
+        return [
+            RelatedItem(direction=str(row["direction"]), title=str(row["title"]), url=str(row["url"]))
+            for row in rows
+        ]
+
     def _migrate(self) -> None:
         columns = {
             str(row["name"])
@@ -281,4 +350,15 @@ class Index:
                 SELECT title, snippet, category, path, id FROM items
                 """
             )
+        self.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS item_links (
+                id INTEGER PRIMARY KEY,
+                source_key TEXT NOT NULL,
+                from_item_key TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                UNIQUE(source_key, from_item_key, target_url)
+            )
+            """
+        )
         self.connection.commit()

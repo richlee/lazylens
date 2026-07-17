@@ -10,6 +10,19 @@ from lazylens.models import IndexedItem, SourceConfig
 def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    target = IndexedItem(
+        source_key="local",
+        item_key="hld.md",
+        title="HLD",
+        url="file:///hld.md",
+        path="/tmp/hld.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="High level design.",
+    )
     item = IndexedItem(
         source_key="local",
         item_key="architecture.md",
@@ -22,15 +35,18 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         category="Architecture",
         container="architecture",
         snippet="Useful context about SharePoint and Confluence indexing.",
+        links=("file:///hld.md",),
     )
 
     with Index(db_path) as index:
         index.upsert_source(source)
-        assert index.upsert_items([item]) == 1
+        assert index.upsert_items([target, item]) == 2
         results = index.search("SharePoint")
         prefix_results = index.search("Arch")
         multi_prefix_results = index.search("Share Conf")
         punctuation_results = index.search("SharePoint?")
+        related = index.related_items(results[0].id)
+        inbound = index.related_items(index.search("HLD")[0].id)
 
     assert len(results) == 1
     assert results[0].title == "Architecture Notes"
@@ -40,15 +56,19 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert prefix_results[0].title == "Architecture Notes"
     assert multi_prefix_results[0].title == "Architecture Notes"
     assert punctuation_results[0].title == "Architecture Notes"
+    assert related[0].direction == "Links to"
+    assert related[0].title == "HLD"
+    assert inbound[0].direction == "Linked from"
+    assert inbound[0].title == "Architecture Notes"
 
     with Index(db_path) as index:
         sources = index.sources()
         categories = index.categories(source_key="local")
 
     assert sources[0].name == "Local"
-    assert sources[0].count == 1
+    assert sources[0].count == 2
     assert categories[0].name == "Architecture"
-    assert categories[0].count == 1
+    assert categories[0].count == 2
 
 
 def test_index_migrates_existing_database(tmp_path: Path) -> None:

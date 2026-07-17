@@ -43,6 +43,7 @@ class IndexedItem:
     category: str
     container: str
     snippet: str
+    links: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -59,3 +60,10 @@ class SearchResult:
     container: str
     snippet: str
     rank: float
+
+
+@dataclass(frozen=True)
+class RelatedItem:
+    direction: str
+    title: str
+    url: str

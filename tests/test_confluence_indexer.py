@@ -250,7 +250,7 @@ def test_iter_confluence_refresh_skips_body_fetch_for_unchanged_page(monkeypatch
             return {"results": []}
         raise AssertionError(f"Unexpected body fetch: {request}")
 
-    items, seen_item_keys, unchanged = iter_confluence_refresh(
+    items, seen_item_keys, unchanged, complete = iter_confluence_refresh(
         source,
         existing_items={"456": existing},
         fetch_json=fetch_json,
@@ -259,6 +259,7 @@ def test_iter_confluence_refresh_skips_body_fetch_for_unchanged_page(monkeypatch
     assert items == []
     assert seen_item_keys == {"456"}
     assert unchanged == 1
+    assert complete is True
     assert all(request["path"] != "/api/v2/pages/456" for request in calls)
 
 

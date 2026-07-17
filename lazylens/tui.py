@@ -425,6 +425,7 @@ class LazylensApp(App[None]):
         changed = 0
         unchanged = 0
         removed = 0
+        pruned = True
         skipped = 0
         with Index(self.db_path) as index:
             for source in self.configured_sources:
@@ -436,8 +437,10 @@ class LazylensApp(App[None]):
                 changed += report.changed
                 unchanged += report.unchanged
                 removed += report.removed
+                pruned = pruned and report.pruned
         await self.reload_from_db()
-        message = f"Indexed {changed} changed, skipped {unchanged} unchanged, removed {removed}"
+        prune_status = f"removed {removed}" if pruned else "prune skipped"
+        message = f"Indexed {changed} changed, skipped {unchanged} unchanged, {prune_status}"
         self.notify(message + (f"; skipped {skipped} source(s)" if skipped else ""))
 
     async def action_open_selected(self) -> None:

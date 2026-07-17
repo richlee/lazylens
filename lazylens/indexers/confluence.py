@@ -100,7 +100,7 @@ class BlockExtractor(HTMLParser):
 
 
 def iter_confluence_items(source: SourceConfig, *, fetch_json: JsonFetcher | None = None) -> list[IndexedItem]:
-    items, _seen_item_keys, _unchanged = iter_confluence_refresh(source, fetch_json=fetch_json)
+    items, _seen_item_keys, _unchanged, _complete = iter_confluence_refresh(source, fetch_json=fetch_json)
     return items
 
 
@@ -109,7 +109,7 @@ def iter_confluence_refresh(
     *,
     existing_items: Mapping[str, SearchResult] | None = None,
     fetch_json: JsonFetcher | None = None,
-) -> tuple[list[IndexedItem], set[str], int]:
+) -> tuple[list[IndexedItem], set[str], int, bool]:
     base_url = confluence_base_url(confluence_setting(source, "base_url", "CONFLUENCE_BASE_URL"))
     email = confluence_setting(source, "email", "CONFLUENCE_EMAIL")
     api_token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
@@ -123,8 +123,9 @@ def iter_confluence_refresh(
     items: list[IndexedItem] = []
     seen_item_keys: set[str] = set()
     unchanged = 0
+    complete = True
     for space in spaces:
-        space_items, space_seen_item_keys, space_unchanged = iter_space_pages(
+        space_items, space_seen_item_keys, space_unchanged, space_complete = iter_space_pages(
             source,
             base_url,
             headers,
@@ -135,7 +136,8 @@ def iter_confluence_refresh(
         items.extend(space_items)
         seen_item_keys.update(space_seen_item_keys)
         unchanged += space_unchanged
-    return items, seen_item_keys, unchanged
+        complete = complete and space_complete
+    return items, seen_item_keys, unchanged, complete
 
 
 def resolve_spaces(
@@ -181,7 +183,7 @@ def iter_space_pages(
     fetch_json: JsonFetcher,
     space: dict[str, str],
     existing_items: Mapping[str, SearchResult] | None = None,
-) -> tuple[list[IndexedItem], set[str], int]:
+) -> tuple[list[IndexedItem], set[str], int, bool]:
     limit = int(source.settings.get("page_limit", 100))
     max_pages = int(source.settings.get("max_pages", 5))
     path = "/api/v2/pages"
@@ -202,6 +204,7 @@ def iter_space_pages(
         path = str(next_path) if next_path else ""
         params = {}
 
+    complete = not path
     structure_nodes = confluence_structure_nodes(base_url, headers, fetch_json, pages)
     hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")), structure_nodes)
     items: list[IndexedItem] = []
@@ -231,7 +234,7 @@ def iter_space_pages(
             page = confluence_page_with_body(base_url, headers, fetch_json, page_id)
             item = confluence_page_to_item(source, base_url, page, space, hierarchy)
         items.append(item)
-    return items, seen_item_keys, unchanged
+    return items, seen_item_keys, unchanged, complete
 
 
 def confluence_page_to_item(

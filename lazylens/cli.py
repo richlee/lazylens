@@ -36,7 +36,8 @@ Run lazylens index after changing configured local folders. Later versions shoul
 
 
 def render_index_report(report: IndexReport) -> str:
-    return f"{report.changed} items ({report.unchanged} unchanged, {report.removed} removed)"
+    prune_status = f"{report.removed} removed" if report.pruned else "prune skipped"
+    return f"{report.changed} items ({report.unchanged} unchanged, {prune_status})"
 
 
 def render_config(*, database: Path, key: str, name: str, root: Path) -> str:

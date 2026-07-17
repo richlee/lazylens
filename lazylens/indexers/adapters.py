@@ -20,6 +20,7 @@ class SourceRefresh:
     items: list[IndexedItem]
     seen_item_keys: set[str]
     unchanged: int = 0
+    complete: bool = True
 
 
 def iter_source_items(source: SourceConfig) -> Iterable[IndexedItem]:
@@ -35,6 +36,6 @@ def iter_source_refresh(
         items, seen_item_keys, unchanged = iter_local_refresh(source, existing_items=existing_items)
         return SourceRefresh(items=items, seen_item_keys=seen_item_keys, unchanged=unchanged)
     if source.type == "confluence":
-        items, seen_item_keys, unchanged = iter_confluence_refresh(source, existing_items=existing_items)
-        return SourceRefresh(items=items, seen_item_keys=seen_item_keys, unchanged=unchanged)
+        items, seen_item_keys, unchanged, complete = iter_confluence_refresh(source, existing_items=existing_items)
+        return SourceRefresh(items=items, seen_item_keys=seen_item_keys, unchanged=unchanged, complete=complete)
     raise IndexingError(f"{source.type} sources are not implemented yet")

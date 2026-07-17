@@ -225,6 +225,10 @@ def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
 
             await pilot.press("left")
             await pilot.pause()
+            highlighted = results.highlighted_child
             assert app.results[0].title == "Product Overview"
+            assert len(app.results) == 2
+            assert highlighted is not None
+            assert getattr(highlighted, "result").title == "Product Overview"
 
     asyncio.run(run_app())

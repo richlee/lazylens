@@ -225,7 +225,7 @@ class LazylensApp(App[None]):
         self.selected_category_key = None
         await self.refresh_results()
 
-    async def refresh_results(self) -> None:
+    async def refresh_results(self, *, highlight_item_id: int | None = None) -> None:
         with Index(self.db_path) as index:
             self.results = index.search(
                 self.query_text,
@@ -237,8 +237,8 @@ class LazylensApp(App[None]):
         await result_list.clear()
         if self.results:
             await result_list.extend([ResultItem(result) for result in self.results])
-            result_list.index = 0
-            await self.update_current_result(self.results[0])
+            result_list.index = self.result_index(highlight_item_id)
+            await self.update_current_result(self.results[result_list.index or 0])
             return
         await result_list.append(MessageItem(self.empty_results_message()))
         result_list.index = None
@@ -375,7 +375,9 @@ class LazylensApp(App[None]):
             return
         if not self.history:
             return
-        await self.show_context_result(self.history.pop(), push_history=False)
+        previous = self.history.pop()
+        await self.refresh_results(highlight_item_id=previous.id)
+        self.query_one("#results", ListView).focus()
 
     async def follow_selected_relation(self) -> None:
         focused = self.focused
@@ -412,6 +414,14 @@ class LazylensApp(App[None]):
         if isinstance(item, ResultItem):
             return item.result
         return self.results[0] if self.results else None
+
+    def result_index(self, item_id: int | None) -> int:
+        if item_id is None:
+            return 0
+        for index, result in enumerate(self.results):
+            if result.id == item_id:
+                return index
+        return 0
 
     def empty_results_message(self) -> str:
         if not self.configured_sources:

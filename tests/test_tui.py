@@ -7,8 +7,8 @@ from textual.widgets import Input, ListView
 
 import lazylens.tui as tui
 from lazylens.db import Index
-from lazylens.models import CategorySummary, IndexedItem, SearchResult, SourceConfig
-from lazylens.tui import LazylensApp, category_label, icon_set, item_type_icon, preview_text
+from lazylens.models import CategorySummary, IndexedItem, RelatedItem, SearchResult, SourceConfig
+from lazylens.tui import LazylensApp, category_label, icon_set, item_type_icon, preview_text, relation_label
 
 
 def test_tui_loads_indexed_results(tmp_path: Path) -> None:
@@ -116,6 +116,24 @@ def test_category_label_prefixes_structure_rows_with_source_icons() -> None:
     assert category_label(confluence, icon_set("ascii"), "confluence") == "[C] [F] Architecture (3)"
     assert category_label(jira_root, icon_set("ascii"), "jira") == "[Ji] LAZY (8)"
     assert category_label(unparented, icon_set("ascii"), "jira") == "[Ji] Unparented (2)"
+
+
+def test_relation_label_keeps_clear_space_after_link_icons() -> None:
+    internal = RelatedItem(
+        item_id=1,
+        direction="Links to",
+        title="HLD - Architecture",
+        url="https://example.test/hld",
+    )
+    external = RelatedItem(
+        item_id=None,
+        direction="Links to",
+        title="https://example.test/external",
+        url="https://example.test/external",
+    )
+
+    assert relation_label(internal, icon_set("nerd")) == "\uf0c1  HLD - Architecture"
+    assert relation_label(external, icon_set("ascii")) == "[ext]  https://example.test/external (external)"
 
 
 def test_jira_bug_uses_bug_icon_in_nerd_font() -> None:

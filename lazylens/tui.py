@@ -136,6 +136,12 @@ def category_label(category: CategorySummary | None, icons: IconSet, source_type
     return " ".join(part for part in [source_icon, type_icon, f"{label}{count}"] if part).strip()
 
 
+def relation_label(item: RelatedItem, icons: IconSet) -> str:
+    icon = icons.link if item.item_id is not None else icons.external_link
+    title = item.title if item.item_id is not None else f"{item.title} (external)"
+    return f"{icon}  {title}".strip() if icon else title
+
+
 def item_type_icon(result: SearchResult, icons: IconSet) -> str:
     if result.content_type == "application/vnd.atlassian.jira.issue":
         issue_type = result.snippet.split("|", 1)[0].strip().lower().rstrip(".")
@@ -176,11 +182,7 @@ class MessageItem(ListItem):
 class RelationItem(ListItem):
     def __init__(self, item: RelatedItem, icons: IconSet) -> None:
         self.related_item = item
-        icon = icons.link if item.item_id is not None else icons.external_link
-        label = f"{icon} {item.title}".strip()
-        if item.item_id is None:
-            label = f"{label} (external)"
-        super().__init__(Label(label, markup=False), disabled=item.item_id is None)
+        super().__init__(Label(relation_label(item, icons), markup=False), disabled=item.item_id is None)
 
 
 class LazylensApp(App[None]):

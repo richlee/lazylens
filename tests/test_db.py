@@ -37,6 +37,21 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         container="architecture",
         snippet="API refresh should update the local index.",
     )
+    folder = IndexedItem(
+        source_key="local",
+        item_key="design-folder",
+        title="Folderonly",
+        url="file:///design-folder",
+        path="/tmp/design-folder",
+        content_type="application/vnd.lazylens.folder",
+        modified_at="2026-07-16T13:15:00+00:00",
+        owner="",
+        category="Architecture Notes",
+        container="architecture",
+        snippet="",
+        parent_key="architecture.md",
+        structure_type="folder",
+    )
     item = IndexedItem(
         source_key="local",
         item_key="architecture.md",
@@ -57,8 +72,9 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
 
     with Index(db_path) as index:
         index.upsert_source(source)
-        assert index.upsert_items([target, decision, item]) == 3
+        assert index.upsert_items([target, decision, folder, item]) == 4
         results = index.search("SharePoint")
+        folder_results = index.search("Folderonly")
         prefix_results = index.search("Arch")
         multi_prefix_results = index.search("Share Conf")
         punctuation_results = index.search("SharePoint?")
@@ -69,8 +85,10 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         outgoing = index.outgoing_links(results[0].id)
         incoming = index.incoming_links(hld.id)
         fetched = index.item_by_id(hld.id)
+        children = index.children(source_key="local", parent_key="architecture.md")
 
     assert len(results) == 1
+    assert folder_results == []
     assert results[0].title == "Architecture Notes"
     assert results[0].source_key == "local"
     assert results[0].category == "Architecture"
@@ -89,6 +107,7 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert incoming[0].title == "Architecture Notes"
     assert fetched is not None
     assert fetched.title == "HLD"
+    assert [child.title for child in children] == ["Folderonly", "HLD"]
 
     with Index(db_path) as index:
         sources = index.sources()

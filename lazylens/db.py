@@ -139,22 +139,24 @@ class Index:
             )
             item_id = int(cursor.fetchone()["id"])
             self.connection.execute("DELETE FROM item_fts WHERE item_id = ?", (item_id,))
-            self.connection.execute(
-                "INSERT INTO item_fts (title, snippet, category, path, item_id) VALUES (?, ?, ?, ?, ?)",
-                (item.title, item.snippet, item.category, item.path, item_id),
-            )
+            if item.structure_type == "page":
+                self.connection.execute(
+                    "INSERT INTO item_fts (title, snippet, category, path, item_id) VALUES (?, ?, ?, ?, ?)",
+                    (item.title, item.snippet, item.category, item.path, item_id),
+                )
             self.connection.execute(
                 "DELETE FROM item_links WHERE source_key = ? AND from_item_key = ?",
                 (item.source_key, item.item_key),
             )
-            self.connection.executemany(
-                """
-                INSERT INTO item_links (source_key, from_item_key, target_url)
-                VALUES (?, ?, ?)
-                ON CONFLICT(source_key, from_item_key, target_url) DO NOTHING
-                """,
-                [(item.source_key, item.item_key, link) for link in item.links if link],
-            )
+            if item.structure_type == "page":
+                self.connection.executemany(
+                    """
+                    INSERT INTO item_links (source_key, from_item_key, target_url)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(source_key, from_item_key, target_url) DO NOTHING
+                    """,
+                    [(item.source_key, item.item_key, link) for link in item.links if link],
+                )
             count += 1
         self.connection.commit()
         return count
@@ -175,6 +177,7 @@ class Index:
         if category:
             filters.append("items.category = ?")
             params.append(category)
+        filters.append("items.structure_type = 'page'")
         where = f"WHERE {' AND '.join(filters)}" if filters else ""
 
         fts_query = prefix_fts_query(query)
@@ -230,6 +233,7 @@ class Index:
             SELECT sources.key, sources.name, sources.type, COUNT(items.id) AS count
             FROM sources
             LEFT JOIN items ON items.source_key = sources.key
+                           AND items.structure_type = 'page'
             GROUP BY sources.key, sources.name, sources.type
             ORDER BY sources.name COLLATE NOCASE
             """
@@ -265,6 +269,7 @@ class Index:
                     SELECT category, COUNT(*) AS count
                     FROM items
                     WHERE source_key = ?
+                      AND structure_type = 'page'
                     GROUP BY category
                 ) AS grouped
                 LEFT JOIN items AS top_level
@@ -294,6 +299,7 @@ class Index:
                 FROM (
                     SELECT category, COUNT(*) AS count
                     FROM items
+                    WHERE structure_type = 'page'
                     GROUP BY category
                 ) AS grouped
                 LEFT JOIN items AS top_level
@@ -312,6 +318,22 @@ class Index:
             )
             for row in rows
         ]
+
+    def children(self, *, source_key: str, parent_key: str) -> list[SearchResult]:
+        rows = self.connection.execute(
+            """
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            WHERE source_key = ?
+              AND parent_key = ?
+            ORDER BY
+                CASE structure_type WHEN 'folder' THEN 0 ELSE 1 END,
+                title COLLATE NOCASE
+            """,
+            (source_key, parent_key),
+        ).fetchall()
+        return [search_result_from_row(row) for row in rows]
+
     def related_items(self, item_id: int, *, limit: int = 12) -> list[RelatedItem]:
         return [*self.outgoing_links(item_id, limit=limit), *self.incoming_links(item_id, limit=limit)][:limit]
 
@@ -445,6 +467,7 @@ def search_result_from_row(row: sqlite3.Row) -> SearchResult:
     return SearchResult(
         id=int(row["id"]),
         source_key=str(row["source_key"]),
+        item_key=str(row["item_key"]),
         title=str(row["title"]),
         url=str(row["url"]),
         path=str(row["path"]),

@@ -147,6 +147,10 @@ def test_iter_confluence_items_uses_folder_nodes_for_page_hierarchy(monkeypatch:
 
     items = iter_confluence_items(source, fetch_json=fetch_json)
 
+    folder = next(item for item in items if item.title == "Design Notes")
+    assert folder.structure_type == "folder"
+    assert folder.category == "Product Architecture"
+    assert folder.parent_key == "200"
     foldered = next(item for item in items if item.title == "Foldered Decision")
     assert foldered.category == "Product Architecture"
     assert foldered.parent_key == "900"

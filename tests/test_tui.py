@@ -46,6 +46,7 @@ def test_preview_text_formats_metadata_and_highlights_query() -> None:
     result = SearchResult(
         id=1,
         source_key="local",
+        item_key="architecture.md",
         title="Architecture Notes",
         url="file:///architecture.md",
         path="/tmp/architecture.md",
@@ -265,6 +266,7 @@ def test_tui_structure_enter_promotes_top_level_page(tmp_path: Path) -> None:
         category="Product Overview",
         container="product",
         snippet="High level design.",
+        parent_key="product.md",
     )
 
     with Index(db_path) as index:
@@ -285,7 +287,176 @@ def test_tui_structure_enter_promotes_top_level_page(tmp_path: Path) -> None:
             await pilot.pause()
 
             assert app.focused is results
-            assert [result.title for result in app.results] == ["Product Overview"]
+            assert [result.title for result in app.results] == ["HLD"]
+
+    asyncio.run(run_app())
+
+
+def test_tui_enter_drills_into_folder_result_and_back_restores_parent(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    product = IndexedItem(
+        source_key="local",
+        item_key="product.md",
+        title="Product Overview",
+        url="file:///product.md",
+        path="/tmp/product.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="Product context.",
+    )
+    folder = IndexedItem(
+        source_key="local",
+        item_key="folder-1",
+        title="Design Notes",
+        url="file:///folder-1",
+        path="/tmp/folder-1",
+        content_type="application/vnd.lazylens.folder",
+        modified_at="2026-07-16T13:01:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="",
+        parent_key="product.md",
+        structure_type="folder",
+    )
+    child = IndexedItem(
+        source_key="local",
+        item_key="decision.md",
+        title="Decision Note",
+        url="file:///decision.md",
+        path="/tmp/decision.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:02:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="Decision context.",
+        parent_key="folder-1",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([product, folder, child])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            categories = app.query_one("#categories", ListView)
+            results = app.query_one("#results", ListView)
+
+            categories.focus()
+            categories.index = 1
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [result.title for result in app.results] == ["Design Notes"]
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [result.title for result in app.results] == ["Decision Note"]
+
+            await pilot.press("left")
+            await pilot.pause()
+            assert [result.title for result in app.results] == ["Design Notes"]
+            assert app.focused is results
+
+    asyncio.run(run_app())
+
+
+def test_tui_right_drills_into_page_children_without_changing_enter_open(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    product = IndexedItem(
+        source_key="local",
+        item_key="product.md",
+        title="Product Overview",
+        url="file:///product.md",
+        path="/tmp/product.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="Product context.",
+    )
+    research = IndexedItem(
+        source_key="local",
+        item_key="research.md",
+        title="Research Sandbox",
+        url="file:///research.md",
+        path="/tmp/research.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:01:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="Research context.",
+        parent_key="product.md",
+    )
+    folder = IndexedItem(
+        source_key="local",
+        item_key="field-notes",
+        title="Field Notes",
+        url="file:///field-notes",
+        path="/tmp/field-notes",
+        content_type="application/vnd.lazylens.folder",
+        modified_at="2026-07-16T13:02:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="",
+        parent_key="research.md",
+        structure_type="folder",
+    )
+    note = IndexedItem(
+        source_key="local",
+        item_key="note.md",
+        title="SharePoint Field Note",
+        url="file:///note.md",
+        path="/tmp/note.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:03:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="SharePoint context.",
+        parent_key="field-notes",
+    )
+    opened: list[str] = []
+    monkeypatch.setattr(tui, "open_url", opened.append)
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([product, research, folder, note])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            categories = app.query_one("#categories", ListView)
+
+            categories.focus()
+            categories.index = 1
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [result.title for result in app.results] == ["Research Sandbox"]
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert opened == ["file:///research.md"]
+            assert [result.title for result in app.results] == ["Research Sandbox"]
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert [result.title for result in app.results] == ["Field Notes"]
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [result.title for result in app.results] == ["SharePoint Field Note"]
 
     asyncio.run(run_app())
 

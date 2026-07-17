@@ -179,6 +179,9 @@ def iter_space_pages(
 
     structure_nodes = confluence_structure_nodes(base_url, headers, fetch_json, pages)
     hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")), structure_nodes)
+    for node in structure_nodes.values():
+        if node.get("type") == "folder":
+            yield confluence_folder_to_item(source, base_url, node, space, hierarchy)
     for page in pages:
         yield confluence_page_to_item(source, base_url, page, space, hierarchy)
 
@@ -219,6 +222,36 @@ def confluence_page_to_item(
         links=tuple(page_links),
         parent_key=str(page.get("parentId") or ""),
         structure_type=str(page.get("type") or "page"),
+    )
+
+
+def confluence_folder_to_item(
+    source: SourceConfig,
+    base_url: str,
+    folder: dict[str, Any],
+    space: dict[str, str],
+    hierarchy: dict[str, dict[str, str]],
+) -> IndexedItem:
+    folder_id = str(folder.get("id", ""))
+    title = str(folder.get("title", folder_id or "Untitled folder"))
+    structure = hierarchy.get(folder_id, {})
+    category = structure.get("top_title") or space.get("key") or space.get("name") or "Confluence"
+    version = folder.get("version", {}) if isinstance(folder.get("version"), dict) else {}
+    modified_at = str(version.get("createdAt") or folder.get("createdAt") or datetime.now(timezone.utc).isoformat())
+    return IndexedItem(
+        source_key=source.key,
+        item_key=folder_id,
+        title=title,
+        url=confluence_web_url(base_url, str(folder.get("_links", {}).get("base", ""))) if isinstance(folder.get("_links"), dict) else base_url,
+        path=f"{space.get('key') or space.get('id')}/{title}",
+        content_type="application/vnd.atlassian.confluence.folder",
+        modified_at=modified_at,
+        owner=str(folder.get("ownerId") or folder.get("authorId") or ""),
+        category=category,
+        container=space.get("name", category),
+        snippet="",
+        parent_key=str(folder.get("parentId") or ""),
+        structure_type="folder",
     )
 
 
@@ -267,12 +300,12 @@ def confluence_hierarchy(
 ) -> dict[str, dict[str, str]]:
     node_by_id = structure_nodes or {str(page.get("id", "")): page for page in pages}
     hierarchy = {}
-    for page in pages:
-        page_id = str(page.get("id", ""))
-        top = top_level_node(page, node_by_id, homepage_id)
-        hierarchy[page_id] = {
-            "top_id": str(top.get("id", "")) if top else page_id,
-            "top_title": str(top.get("title", "")) if top else str(page.get("title", "")),
+    for node in node_by_id.values():
+        node_id = str(node.get("id", ""))
+        top = top_level_node(node, node_by_id, homepage_id)
+        hierarchy[node_id] = {
+            "top_id": str(top.get("id", "")) if top else node_id,
+            "top_title": str(top.get("title", "")) if top else str(node.get("title", "")),
         }
     return hierarchy
 

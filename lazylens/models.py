@@ -59,6 +59,7 @@ class IndexedItem:
 class SearchResult:
     id: int
     source_key: str
+    item_key: str
     title: str
     url: str
     path: str

@@ -105,7 +105,8 @@ class CategoryItem(ListItem):
 class ResultItem(ListItem):
     def __init__(self, result: SearchResult, icons: IconSet) -> None:
         self.result = result
-        super().__init__(Label(f"{icons.page} {result.title}".strip(), markup=False))
+        icon = icons.structure(result.structure_type)
+        super().__init__(Label(f"{icon} {result.title}".strip(), markup=False))
 
 
 class MessageItem(ListItem):
@@ -247,6 +248,7 @@ class LazylensApp(App[None]):
         self.pending_category_key: str | None = None
         self.query_text = ""
         self.history: list[SearchResult] = []
+        self.result_stack: list[tuple[list[SearchResult], int | None]] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -267,7 +269,7 @@ class LazylensApp(App[None]):
                 yield ListView(id="outgoing")
         yield Static(
             Text(
-                "Filter Structure: Enter | Open: Enter | Follow: Right/Space | Back: Left/Backspace | "
+                "Structure: Enter | Open/Drill: Enter | Drill/Follow: Right/Space | Back: Left/Backspace | "
                 "Search: / | Clear Search: c | Refresh: r | Quit: q"
             ),
             id="commands",
@@ -372,11 +374,13 @@ class LazylensApp(App[None]):
     async def apply_search(self, value: str) -> None:
         self.query_text = value.strip()
         self.history.clear()
+        self.result_stack.clear()
         await self.refresh_results()
         self.query_one("#results", ListView).focus()
 
     async def action_clear_search(self) -> None:
         self.query_text = ""
+        self.result_stack.clear()
         search = self.query_one("#search", Input)
         search.value = ""
         await self.refresh_results()
@@ -390,6 +394,12 @@ class LazylensApp(App[None]):
         if result is None:
             await incoming_list.append(MessageItem("No document selected"))
             await outgoing_list.append(MessageItem("No document selected"))
+            incoming_list.index = None
+            outgoing_list.index = None
+            return
+        if result.structure_type != "page":
+            await incoming_list.append(MessageItem("No incoming links"))
+            await outgoing_list.append(MessageItem("No outgoing links"))
             incoming_list.index = None
             outgoing_list.index = None
             return
@@ -441,6 +451,9 @@ class LazylensApp(App[None]):
         if result is None:
             self.notify("No result selected", severity="warning")
             return
+        if result.structure_type != "page":
+            await self.drill_into_result(result)
+            return
         if open_url(result.url):
             self.notify(f"Opened {result.title}")
             return
@@ -454,6 +467,7 @@ class LazylensApp(App[None]):
         self.selected_category_key = None
         self.pending_category_key = None
         self.history.clear()
+        self.result_stack.clear()
         self.update_sources_row()
         await self.refresh_categories()
 
@@ -465,18 +479,31 @@ class LazylensApp(App[None]):
                 result = index.item_by_id(item.item_id)
             if result is not None:
                 self.history.clear()
-                await self.show_context_result(result, push_history=False)
+                self.result_stack.clear()
+                await self.show_children(result, push_history=False)
                 return
         self.history.clear()
+        self.result_stack.clear()
         self.selected_category_key = self.pending_category_key
         await self.refresh_results()
         self.query_one("#results", ListView).focus()
 
     async def action_follow_relation(self) -> None:
+        focused = self.focused
+        if focused is self.query_one("#results", ListView):
+            result = self.selected_result()
+            if result is not None:
+                await self.drill_into_result(result)
+            return
         await self.follow_selected_relation()
 
     async def action_back(self) -> None:
         if isinstance(self.focused, Input):
+            return
+        if self.result_stack:
+            results, highlight_item_id = self.result_stack.pop()
+            await self.replace_results(results, highlight_item_id=highlight_item_id)
+            self.query_one("#results", ListView).focus()
             return
         if not self.history:
             return
@@ -500,18 +527,45 @@ class LazylensApp(App[None]):
             self.history.append(previous)
         await self.show_context_result(result, push_history=False)
 
+    async def drill_into_result(self, result: SearchResult) -> None:
+        with Index(self.db_path) as index:
+            children = index.children(source_key=result.source_key, parent_key=result.item_key)
+        if not children:
+            self.notify(f"No children under {result.title}", severity="warning")
+            return
+        self.push_result_stack()
+        await self.replace_results(children)
+
+    async def show_children(self, result: SearchResult, *, push_history: bool = True) -> None:
+        with Index(self.db_path) as index:
+            children = index.children(source_key=result.source_key, parent_key=result.item_key)
+        if not children:
+            await self.show_context_result(result, push_history=push_history)
+            return
+        if push_history:
+            self.push_result_stack()
+        await self.replace_results(children)
+
     async def show_context_result(self, result: SearchResult, *, push_history: bool = True) -> None:
         if push_history:
-            previous = self.selected_result()
-            if previous is not None:
-                self.history.append(previous)
-        self.results = [result]
+            self.push_result_stack()
+        await self.replace_results([result], highlight_item_id=result.id)
+
+    async def replace_results(self, results: list[SearchResult], *, highlight_item_id: int | None = None) -> None:
+        self.results = results
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
-        await result_list.append(ResultItem(result, self.icons))
-        result_list.index = 0
-        await self.update_current_result(result)
+        await result_list.extend([ResultItem(result, self.icons) for result in results])
+        result_list.index = self.result_index(highlight_item_id)
+        await self.update_current_result(results[result_list.index or 0])
         result_list.focus()
+
+    def push_result_stack(self) -> None:
+        self.result_stack.append((list(self.results), self.current_result_id()))
+
+    def current_result_id(self) -> int | None:
+        result = self.selected_result()
+        return result.id if result is not None else None
 
     def selected_result(self) -> SearchResult | None:
         result_list = self.query_one("#results", ListView)

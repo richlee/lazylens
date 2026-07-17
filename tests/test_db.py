@@ -169,3 +169,69 @@ def test_index_migrates_existing_database(tmp_path: Path) -> None:
 
     assert results[0].category == ""
     assert results[0].container == ""
+
+
+def test_index_resolves_links_across_sources(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    confluence_source = SourceConfig(key="conf", name="Confluence", type="confluence")
+    jira_source = SourceConfig(key="jira", name="Jira", type="jira")
+    other_source = SourceConfig(key="other", name="Other", type="local")
+    hld = IndexedItem(
+        source_key="conf",
+        item_key="123",
+        title="HLD",
+        url="https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD",
+        path="ARCH/HLD",
+        content_type="text/html",
+        modified_at="2026-07-17T10:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="ARCH",
+        snippet="High level design.",
+        links=("https://example.atlassian.net/browse/LAZY-1",),
+    )
+    epic = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-1",
+        title="LAZY-1 - Build document graph",
+        url="https://example.atlassian.net/browse/LAZY-1",
+        path="LAZY/LAZY-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T10:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Epic.",
+        links=("https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD",),
+    )
+    colliding_key = IndexedItem(
+        source_key="other",
+        item_key="LAZY-1",
+        title="Wrong duplicate key",
+        url="file:///wrong-duplicate-key",
+        path="/tmp/wrong-duplicate-key",
+        content_type="text/markdown",
+        modified_at="2026-07-17T10:45:00+00:00",
+        owner="",
+        category="Other",
+        container="Other",
+        snippet="This item has the same item key as the Jira issue but is from another source.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(confluence_source)
+        index.upsert_source(jira_source)
+        index.upsert_source(other_source)
+        index.upsert_items([hld, epic, colliding_key])
+        hld_result = index.search("HLD")[0]
+        epic_result = index.search("LAZY")[0]
+        hld_outgoing = index.outgoing_links(hld_result.id)
+        epic_incoming = index.incoming_links(epic_result.id)
+        epic_outgoing = index.outgoing_links(epic_result.id)
+        hld_incoming = index.incoming_links(hld_result.id)
+
+    assert hld_outgoing[0].title == "LAZY-1 - Build document graph"
+    assert hld_outgoing[0].item_id == epic_result.id
+    assert epic_incoming[0].title == "HLD"
+    assert epic_outgoing[0].title == "HLD"
+    assert hld_incoming[0].title == "LAZY-1 - Build document graph"

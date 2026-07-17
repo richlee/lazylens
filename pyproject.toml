@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [
   { name = "Rich Lee", email = "richalee@pm.me" }
 ]
-keywords = ["confluence", "sharepoint", "documents", "search", "tui", "textual"]
+keywords = ["confluence", "jira", "sharepoint", "documents", "search", "tui", "textual"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Environment :: Console",

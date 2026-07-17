@@ -423,7 +423,7 @@ class Index:
             """,
             (str(item["source_key"]), str(item["item_key"]), limit),
         ).fetchall()
-        target_lookup = self.item_lookup(str(item["source_key"]))
+        target_lookup = self.item_lookup()
         return [
             related_item_from_target_url(str(row["target_url"]), "Links to", target_lookup)
             for row in link_rows
@@ -439,19 +439,17 @@ class Index:
         target_key = relationship_url_key(str(item["url"]))
         link_rows = self.connection.execute(
             """
-            SELECT from_item_key, target_url
+            SELECT source_key, from_item_key, target_url
             FROM item_links
-            WHERE item_links.source_key = ?
             ORDER BY target_url COLLATE NOCASE
             """,
-            (str(item["source_key"]),),
         ).fetchall()
-        source_lookup = self.item_lookup(str(item["source_key"]))
+        source_lookup = self.item_lookup()
         related = []
         for row in link_rows:
             if relationship_url_key(str(row["target_url"])) != target_key:
                 continue
-            source_item = source_lookup.by_item_key.get(str(row["from_item_key"]))
+            source_item = source_lookup.by_source_item_key.get((str(row["source_key"]), str(row["from_item_key"])))
             if source_item is None:
                 continue
             related.append(
@@ -464,18 +462,27 @@ class Index:
             )
         return sorted(related, key=lambda item: item.title.lower())[:limit]
 
-    def item_lookup(self, source_key: str) -> ItemLookup:
-        rows = self.connection.execute(
-            """
-            SELECT items.*, 0.0 AS rank
-            FROM items
-            WHERE source_key = ?
-            """,
-            (source_key,),
-        ).fetchall()
+    def item_lookup(self, source_key: str | None = None) -> ItemLookup:
+        if source_key:
+            rows = self.connection.execute(
+                """
+                SELECT items.*, 0.0 AS rank
+                FROM items
+                WHERE source_key = ?
+                """,
+                (source_key,),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                """
+                SELECT items.*, 0.0 AS rank
+                FROM items
+                """
+            ).fetchall()
         pairs = [(str(row["item_key"]), search_result_from_row(row)) for row in rows]
         return ItemLookup(
             by_item_key={item_key: item for item_key, item in pairs},
+            by_source_item_key={(item.source_key, item_key): item for item_key, item in pairs},
             by_url={item.url: item for _item_key, item in pairs},
             by_relationship_key={relationship_url_key(item.url): item for _item_key, item in pairs},
         )
@@ -554,6 +561,7 @@ def search_result_from_row(row: sqlite3.Row) -> SearchResult:
 @dataclass(frozen=True)
 class ItemLookup:
     by_item_key: dict[str, SearchResult]
+    by_source_item_key: dict[tuple[str, str], SearchResult]
     by_url: dict[str, SearchResult]
     by_relationship_key: dict[str, SearchResult]
 
@@ -574,4 +582,10 @@ def relationship_url_key(url: str) -> str:
     match = re.search(r"/spaces/([^/]+)/pages/(\d+)(?:/|$)", path)
     if match:
         return f"{parsed.scheme}://{parsed.netloc}/spaces/{match.group(1)}/pages/{match.group(2)}"
+    match = re.search(r"/browse/([A-Z][A-Z0-9]+-\d+)(?:/|$)", path, flags=re.IGNORECASE)
+    if match:
+        return f"{parsed.scheme}://{parsed.netloc}/browse/{match.group(1).upper()}"
+    match = re.search(r"/issues/([A-Z][A-Z0-9]+-\d+)(?:/|$)", path, flags=re.IGNORECASE)
+    if match:
+        return f"{parsed.scheme}://{parsed.netloc}/browse/{match.group(1).upper()}"
     return unquote(url)

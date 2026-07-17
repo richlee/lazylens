@@ -22,6 +22,7 @@ Scope:
 - Local SQLite database with FTS5.
 - Source adapters:
   - Confluence via Atlassian API.
+  - Jira via Atlassian API.
   - SharePoint via Microsoft Graph.
   - Local folder adapter for testing and non-cloud documents.
 - Incremental indexing by source item modified time.
@@ -31,7 +32,7 @@ Scope:
 
 Core data:
 
-- Source: Confluence, SharePoint, local.
+- Source: Confluence, Jira, SharePoint, local.
 - Container: space, site, library, folder.
 - Item: page, document, PDF, Office file, attachment.
 - Metadata: title, source, URL, owner/author, modified time, content type, path.
@@ -80,6 +81,7 @@ Indexing:
 - Store enough text to make search and previews useful.
 - Extract and store links between indexed items:
   - Confluence page links and web links from storage/body HTML.
+  - Jira issue links, parent relationships, and links embedded in issue descriptions.
   - SharePoint/Office links where exposed by Microsoft Graph or extractable from previews.
   - Local Markdown links for local folder sources.
   - Resolve target URLs to indexed item IDs where possible; keep unresolved URLs as edges too.
@@ -95,6 +97,7 @@ Snippet strategy:
 Phase 1 success:
 
 - Can connect to one Confluence instance and one SharePoint tenant.
+- Can connect to one Jira project and navigate from Confluence pages into issues.
 - Can index a small controlled scope.
 - Can search locally in under a second.
 - Can open the source item in a browser from the TUI.
@@ -188,7 +191,7 @@ Phase 2 success:
 
 ## Later Ideas
 
-- Jira issue/project linkage.
+- Jira remote links and richer epic/story hierarchy handling.
 - Teams channel file discovery through Microsoft Graph.
 - Related document suggestions beyond explicit links.
 - Stale-document surfacing.

@@ -34,6 +34,7 @@ class IconSet:
     source: str
     local_source: str
     confluence_source: str
+    jira_source: str
 
     def structure(self, kind: str) -> str:
         if kind == "space":
@@ -49,6 +50,8 @@ class IconSet:
             return self.local_source
         if source_type == "confluence":
             return self.confluence_source
+        if source_type == "jira":
+            return self.jira_source
         return self.source
 
 
@@ -63,6 +66,7 @@ ICON_SETS = {
         source="",
         local_source="",
         confluence_source="",
+        jira_source="",
     ),
     "unicode": IconSet(
         space="\u25a3",
@@ -74,6 +78,7 @@ ICON_SETS = {
         source="\u25c9",
         local_source="\u25c7",
         confluence_source="\u25ce",
+        jira_source="\u25c8",
     ),
     "nerd": IconSet(
         space="\uf0ac",
@@ -85,6 +90,7 @@ ICON_SETS = {
         source="\uf0c2",
         local_source="\uf07b",
         confluence_source="\uf0ac",
+        jira_source="\uf188",
     ),
 }
 
@@ -500,14 +506,18 @@ class LazylensApp(App[None]):
     async def action_follow_relation(self) -> None:
         focused = self.focused
         if focused is self.query_one("#results", ListView):
-            await self.focus_outgoing_links()
+            await self.focus_relation_links()
             return
         await self.follow_selected_relation()
 
-    async def focus_outgoing_links(self) -> None:
+    async def focus_relation_links(self) -> None:
         outgoing = self.query_one("#outgoing", ListView)
         if isinstance(outgoing.highlighted_child, RelationItem):
             outgoing.focus()
+            return
+        incoming = self.query_one("#incoming", ListView)
+        if isinstance(incoming.highlighted_child, RelationItem):
+            incoming.focus()
             return
         result = self.selected_result()
         if result is not None:

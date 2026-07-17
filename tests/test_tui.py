@@ -531,6 +531,62 @@ def test_tui_right_from_pages_focuses_outgoing_links_before_children(tmp_path: P
     asyncio.run(run_app())
 
 
+def test_tui_right_from_pages_focuses_incoming_when_no_outgoing_links(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="jira", name="Jira", type="jira")
+    epic = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-1",
+        title="LAZY-1 - Epic",
+        url="https://example.atlassian.net/browse/LAZY-1",
+        path="LAZY/LAZY-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-16T14:00:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Epic.",
+    )
+    story = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-2",
+        title="LAZY-2 - Story",
+        url="https://example.atlassian.net/browse/LAZY-2",
+        path="LAZY/LAZY-2",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Story.",
+        links=("https://example.atlassian.net/browse/LAZY-1",),
+        parent_key="LAZY-1",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([epic, story])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            results = app.query_one("#results", ListView)
+            incoming = app.query_one("#incoming", ListView)
+
+            assert app.focused is results
+            assert app.results[0].title == "LAZY-1 - Epic"
+            await pilot.press("right")
+            await pilot.pause()
+
+            assert app.focused is incoming
+            highlighted = incoming.highlighted_child
+            assert highlighted is not None
+            assert getattr(highlighted, "related_item").title == "LAZY-2 - Story"
+
+    asyncio.run(run_app())
+
+
 def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)

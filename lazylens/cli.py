@@ -72,6 +72,28 @@ def render_confluence_source_config(
     return "\n".join(lines) + "\n"
 
 
+def render_jira_source_config(
+    *,
+    key: str,
+    name: str,
+    project_keys: list[str],
+    issue_limit: int,
+    max_pages: int,
+    api_token_env: str,
+) -> str:
+    lines = [
+        f"[sources.{json.dumps(key)}]",
+        f"name = {json.dumps(name)}",
+        'type = "jira"',
+        f"project_keys = {json.dumps(project_keys)}",
+        f"issue_limit = {issue_limit}",
+        f"max_pages = {max_pages}",
+    ]
+    if api_token_env != "JIRA_API_TOKEN":
+        lines.append(f"api_token_env = {json.dumps(api_token_env)}")
+    return "\n".join(lines) + "\n"
+
+
 def write_starter_config(path: Path, *, source: SourceConfig, database: Path, force: bool = False) -> None:
     if path.exists() and not force:
         raise FileExistsError(path)
@@ -119,6 +141,37 @@ def append_confluence_source(
     return True
 
 
+def append_jira_source(
+    path: Path,
+    *,
+    database: Path,
+    key: str,
+    name: str,
+    project_keys: list[str],
+    issue_limit: int,
+    max_pages: int,
+    api_token_env: str,
+    force: bool = False,
+) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    source_text = render_jira_source_config(
+        key=key,
+        name=name,
+        project_keys=project_keys,
+        issue_limit=issue_limit,
+        max_pages=max_pages,
+        api_token_env=api_token_env,
+    )
+    if not path.exists() or force:
+        path.write_text(f"database = {json.dumps(str(database))}\n\n{source_text}", encoding="utf-8")
+        return True
+    text = path.read_text(encoding="utf-8")
+    if config_contains_source(text, key):
+        return False
+    path.write_text(text.rstrip() + "\n\n" + source_text, encoding="utf-8")
+    return True
+
+
 def write_confluence_env_skeleton(
     path: Path,
     *,
@@ -143,6 +196,42 @@ def write_confluence_env_skeleton(
         ),
         encoding="utf-8",
     )
+    path.chmod(0o600)
+    return True
+
+
+def write_jira_env_skeleton(
+    path: Path,
+    *,
+    base_url: str,
+    email: str,
+    api_token_env: str,
+    force: bool = False,
+) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# lazylens Atlassian Cloud API settings.",
+        "# Keep this file out of source control.",
+        f"export JIRA_BASE_URL={json.dumps(base_url)}",
+        f"export JIRA_EMAIL={json.dumps(email)}",
+        f"export {api_token_env}=\"\"",
+        "",
+    ]
+    if path.exists() and not force:
+        text = path.read_text(encoding="utf-8")
+        additions = [
+            line
+            for line in lines
+            if line
+            and line.startswith("export ")
+            and line.split("=", 1)[0].removeprefix("export ") not in text
+        ]
+        if not additions:
+            return False
+        path.write_text(text.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8")
+        path.chmod(0o600)
+        return True
+    path.write_text("\n".join(lines), encoding="utf-8")
     path.chmod(0o600)
     return True
 
@@ -202,6 +291,8 @@ def command_index(args: argparse.Namespace) -> int:
 def command_init(args: argparse.Namespace) -> int:
     if args.kind == "confluence":
         return command_init_confluence(args)
+    if args.kind == "jira":
+        return command_init_jira(args)
 
     config_path = Path(args.config).expanduser() if args.config else default_config_path()
     database = Path(args.database).expanduser() if args.database else default_db_path()
@@ -258,6 +349,41 @@ def command_init_confluence(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_init_jira(args: argparse.Namespace) -> int:
+    config_path = Path(args.config).expanduser() if args.config else default_config_path()
+    database = Path(args.database).expanduser() if args.database else default_db_path()
+    env_path = Path(args.env_file).expanduser() if args.env_file else default_confluence_env_path()
+    key = "personal-jira" if args.key == "local" else args.key
+    name = "Personal Jira" if args.name == "Local" else args.name
+    project_keys = args.project_key or ["LAZYLENS"]
+    api_token_env = "JIRA_API_TOKEN" if args.api_token_env == "CONFLUENCE_API_TOKEN" else args.api_token_env
+    wrote_config = append_jira_source(
+        config_path,
+        database=database,
+        key=key,
+        name=name,
+        project_keys=project_keys,
+        issue_limit=args.issue_limit,
+        max_pages=args.max_pages,
+        api_token_env=api_token_env,
+        force=args.force,
+    )
+    wrote_env = write_jira_env_skeleton(
+        env_path,
+        base_url=args.base_url or "https://example.atlassian.net",
+        email=args.email or "you@example.com",
+        api_token_env=api_token_env,
+        force=args.force_env,
+    )
+
+    print(f"{'Wrote' if wrote_config else 'Config already contains source'}: {config_path}")
+    print(f"{'Wrote' if wrote_env else 'Env file already exists'}: {env_path}")
+    print(f"Jira source: {key} ({', '.join(project_keys)})")
+    print(f"Edit secrets, then run: source {env_path}")
+    print(f"Then run: lazylens doctor && lazylens index {key}")
+    return 0
+
+
 def command_demo(args: argparse.Namespace) -> int:
     config_path = Path(args.config).expanduser() if args.config else default_config_path()
     database = Path(args.database).expanduser() if args.database else configured_db_path(config_path)
@@ -302,17 +428,24 @@ def command_doctor(args: argparse.Namespace) -> int:
         root = source.root if source.root else "(none)"
         if source.type == "local":
             status = "OK" if source.root and source.root.exists() else "missing"
-        elif source.type == "confluence":
-            token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
-            base_url = source.settings.get("base_url") or os.environ.get("CONFLUENCE_BASE_URL")
-            email = source.settings.get("email") or os.environ.get("CONFLUENCE_EMAIL")
+        elif source.type in {"confluence", "jira"}:
+            if source.type == "confluence":
+                token_env = str(source.settings.get("api_token_env", "CONFLUENCE_API_TOKEN"))
+                base_url = source.settings.get("base_url") or os.environ.get("CONFLUENCE_BASE_URL")
+                email = source.settings.get("email") or os.environ.get("CONFLUENCE_EMAIL")
+                required = ["CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", token_env]
+            else:
+                token_env = str(source.settings.get("api_token_env", "JIRA_API_TOKEN"))
+                base_url = source.settings.get("base_url") or os.environ.get("JIRA_BASE_URL")
+                email = source.settings.get("email") or os.environ.get("JIRA_EMAIL")
+                required = ["JIRA_BASE_URL", "JIRA_EMAIL", token_env]
             missing = []
             if not base_url:
-                missing.append("CONFLUENCE_BASE_URL")
+                missing.append(required[0])
             if not email:
-                missing.append("CONFLUENCE_EMAIL")
+                missing.append(required[1])
             if not os.environ.get(token_env):
-                missing.append(token_env)
+                missing.append(required[2])
             status = "OK" if not missing else f"missing: {', '.join(missing)}"
             if missing:
                 status = f"{status}; for zsh/bash run: source {confluence_env_path}"
@@ -339,19 +472,21 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     init_parser = subparsers.add_parser("init", help="Create a starter config.")
-    init_parser.add_argument("kind", nargs="?", choices=["local", "confluence"], default="local")
+    init_parser.add_argument("kind", nargs="?", choices=["local", "confluence", "jira"], default="local")
     init_parser.add_argument("--root", help="Local folder to index. Defaults to the current directory.")
     init_parser.add_argument("--key", default="local", help="Source key. Defaults to local.")
     init_parser.add_argument("--name", default="Local", help="Source display name. Defaults to Local.")
     init_parser.add_argument("--database", help="Database path. Defaults to the platform data path.")
     init_parser.add_argument("--force", action="store_true", help="Replace an existing config.")
     init_parser.add_argument("--space-key", action="append", help="Confluence space key to index. May be repeated.")
+    init_parser.add_argument("--project-key", action="append", help="Jira project key to index. May be repeated.")
     init_parser.add_argument("--base-url", help="Confluence site URL for generated env file.")
     init_parser.add_argument("--email", help="Confluence account email for generated env file.")
     init_parser.add_argument("--api-token-env", default="CONFLUENCE_API_TOKEN", help="API token environment variable.")
     init_parser.add_argument("--env-file", help="Path for generated Confluence env skeleton.")
     init_parser.add_argument("--force-env", action="store_true", help="Replace an existing Confluence env file.")
     init_parser.add_argument("--page-limit", type=int, default=100)
+    init_parser.add_argument("--issue-limit", type=int, default=100)
     init_parser.add_argument("--max-pages", type=int, default=5)
     init_parser.set_defaults(func=command_init)
 

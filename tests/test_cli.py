@@ -94,6 +94,58 @@ def test_cli_init_confluence_writes_config_and_env_skeleton(tmp_path: Path, caps
         assert oct(env_file.stat().st_mode & 0o777) == "0o600"
 
 
+def test_cli_init_jira_writes_config_and_appends_env_skeleton(tmp_path: Path, capsys) -> None:
+    config = tmp_path / "config.toml"
+    env_file = tmp_path / "atlassian.env"
+    db = tmp_path / "index.sqlite3"
+    env_file.write_text(
+        "\n".join(
+            [
+                'export CONFLUENCE_BASE_URL="https://example.atlassian.net/wiki"',
+                'export CONFLUENCE_EMAIL="you@example.com"',
+                'export CONFLUENCE_API_TOKEN="secret"',
+                "",
+            ]
+        )
+    )
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "init",
+                "jira",
+                "--database",
+                str(db),
+                "--env-file",
+                str(env_file),
+                "--base-url",
+                "https://example.atlassian.net",
+                "--email",
+                "you@example.com",
+                "--project-key",
+                "LAZY",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    config_text = config.read_text()
+    env_text = env_file.read_text()
+    assert "Jira source: personal-jira (LAZY)" in output
+    assert f"database = {toml_string(db)}" in config_text
+    assert '[sources."personal-jira"]' in config_text
+    assert 'name = "Personal Jira"' in config_text
+    assert 'type = "jira"' in config_text
+    assert 'project_keys = ["LAZY"]' in config_text
+    assert 'export CONFLUENCE_API_TOKEN="secret"' in env_text
+    assert 'export JIRA_BASE_URL="https://example.atlassian.net"' in env_text
+    assert 'export JIRA_EMAIL="you@example.com"' in env_text
+    assert 'export JIRA_API_TOKEN=""' in env_text
+
+
 def test_cli_demo_creates_searchable_demo_source(tmp_path: Path, capsys) -> None:
     config = tmp_path / "config.toml"
     db = tmp_path / "index.sqlite3"

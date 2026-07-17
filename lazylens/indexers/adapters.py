@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from lazylens.indexers.confluence import iter_confluence_items, iter_confluence_refresh
+from lazylens.indexers.jira import iter_jira_items, iter_jira_refresh
 from lazylens.indexers.local import iter_local_items, iter_local_refresh
 from lazylens.models import IndexedItem, SearchResult, SourceConfig
 
@@ -12,7 +13,7 @@ class IndexingError(RuntimeError):
     pass
 
 
-SUPPORTED_SOURCE_TYPES = {"confluence", "local"}
+SUPPORTED_SOURCE_TYPES = {"confluence", "jira", "local"}
 
 
 @dataclass(frozen=True)
@@ -37,5 +38,8 @@ def iter_source_refresh(
         return SourceRefresh(items=items, seen_item_keys=seen_item_keys, unchanged=unchanged)
     if source.type == "confluence":
         items, seen_item_keys, unchanged, complete = iter_confluence_refresh(source, existing_items=existing_items)
+        return SourceRefresh(items=items, seen_item_keys=seen_item_keys, unchanged=unchanged, complete=complete)
+    if source.type == "jira":
+        items, seen_item_keys, unchanged, complete = iter_jira_refresh(source, existing_items=existing_items)
         return SourceRefresh(items=items, seen_item_keys=seen_item_keys, unchanged=unchanged, complete=complete)
     raise IndexingError(f"{source.type} sources are not implemented yet")

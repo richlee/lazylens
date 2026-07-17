@@ -82,10 +82,11 @@ def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
     assert ascii_icons.project == ""
     assert ascii_icons.page == ""
     assert ascii_icons.source_for("confluence") == "[C]"
+    assert ascii_icons.source_for("jira") == "[Ji]"
     assert nerd_icons.project == ""
     assert nerd_icons.structure("parent-page") == "\uf07c"
     assert nerd_icons.source_for("confluence") == "\uf0ac"
-    assert nerd_icons.source_for("jira") == "J"
+    assert nerd_icons.source_for("jira") == "\uf0ae"
 
 
 def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:

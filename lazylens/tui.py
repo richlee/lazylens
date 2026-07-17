@@ -82,7 +82,7 @@ ICON_SETS = {
         source="",
         local_source="",
         confluence_source="[C]",
-        jira_source="[J]",
+        jira_source="[Ji]",
     ),
     "unicode": IconSet(
         project="",
@@ -95,7 +95,7 @@ ICON_SETS = {
         source="\u25c9",
         local_source="\u25c7",
         confluence_source="\u25ce",
-        jira_source="J",
+        jira_source="\u25c6",
     ),
     "nerd": IconSet(
         project="",
@@ -108,7 +108,7 @@ ICON_SETS = {
         source="\uf0c2",
         local_source="\uf07b",
         confluence_source="\uf0ac",
-        jira_source="J",
+        jira_source="\uf0ae",
     ),
 }
 

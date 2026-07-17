@@ -9,6 +9,7 @@ It should help answer:
 - Where is that document/page?
 - Which source owns it?
 - Is this result worth opening?
+- What is connected to it?
 - What changed recently in this project?
 
 ## Phase 1: Personal Work Index
@@ -35,6 +36,7 @@ Core data:
 - Item: page, document, PDF, Office file, attachment.
 - Metadata: title, source, URL, owner/author, modified time, content type, path.
 - Extract: first useful non-boilerplate text, search snippets, headings.
+- Links: outgoing document links, resolved internal links where possible, and unresolved external URLs.
 - Cache: optional downloaded file path and timestamp.
 
 TUI:
@@ -49,10 +51,15 @@ TUI:
 - Persistent preview/details panel inside the right side of the layout.
 - Preview panel updates as the highlighted result changes.
 - Preview panel shows title, source, modified date, owner, path/URL, and context snippet.
+- Related-docs view:
+  - First version can be a third vertical panel listing linked/related documents for the highlighted item.
+  - The panel should be keyboard navigable; `Enter` opens the related document URL.
+  - It may later become a horizontally expanding series of panes, similar to column-based directory navigation, where moving through one list reveals the next level of related documents.
 - Search result rows should be backed by title, preview text, and metadata, even where the first TUI only renders the title.
 - `Enter`: open the canonical source URL in the browser.
 - `/`: search.
 - `r`: refresh.
+- `g`: open graph view.
 - `d`: download/cache if supported.
 - `i` or right-arrow: details.
 
@@ -70,6 +77,11 @@ Indexing:
 - Daily refresh later via launchd, cron, systemd, or a simple command.
 - Avoid storing whole sensitive documents by default.
 - Store enough text to make search and previews useful.
+- Extract and store links between indexed items:
+  - Confluence page links and web links from storage/body HTML.
+  - SharePoint/Office links where exposed by Microsoft Graph or extractable from previews.
+  - Local Markdown links for local folder sources.
+  - Resolve target URLs to indexed item IDs where possible; keep unresolved URLs as edges too.
 - Full-content local indexing should be opt-in per source/project.
 
 Snippet strategy:
@@ -86,6 +98,31 @@ Phase 1 success:
 - Can search locally in under a second.
 - Can open the source item in a browser from the TUI.
 - Can show enough context to know whether a result is worth opening.
+- Can show related documents for the highlighted result when links are available.
+
+## Navigation Model
+
+The primary workflow is:
+
+1. Fast exploration of the document landscape for orientation and discovery.
+2. Local search/filtering over titles, metadata, and a few hundred useful preview characters per document.
+3. Navigation to a specific canonical source document.
+4. Navigation from that document to related documents.
+
+Related navigation should support both:
+
+- A TUI related-docs panel for fast keyboard-driven use.
+- A generated local browser graph for visual exploration.
+
+Graph view:
+
+- Generate a local HTML graph from the SQLite index.
+- Use a client-side graph library such as D3 or Cytoscape.
+- Nodes represent indexed documents/pages.
+- Edges represent extracted links or inferred relationships.
+- Clicking a node opens the canonical source URL.
+- Keep the graph local/private; do not require a hosted service.
+- Start with bounded neighbourhood graphs around the current item before attempting a whole-project graph.
 
 ## Phase 2: Project Intelligence Layer
 
@@ -139,7 +176,7 @@ Phase 2 success:
 
 - Jira issue/project linkage.
 - Teams channel file discovery through Microsoft Graph.
-- Related document suggestions.
+- Related document suggestions beyond explicit links.
 - Stale-document surfacing.
 - Recently changed in this project view.
 - Optional embeddings for semantic search, only if privacy and storage are acceptable.

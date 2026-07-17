@@ -614,7 +614,7 @@ class Index:
              AND LOWER(epic.snippet) LIKE 'epic%'
             WHERE child.source_key = ?
               AND child.structure_type = 'page'
-            ORDER BY child.title COLLATE NOCASE
+            ORDER BY child.modified_at DESC, child.title COLLATE NOCASE
             """,
             (source_key,),
         ).fetchall()
@@ -641,7 +641,7 @@ class Index:
                           AND LOWER(epic.snippet) LIKE 'epic%'
                     )
               )
-            ORDER BY items.title COLLATE NOCASE
+            ORDER BY items.modified_at DESC, items.title COLLATE NOCASE
             """,
             (source_key,),
         ).fetchall()
@@ -652,10 +652,16 @@ class Index:
             """
             SELECT items.*, 0.0 AS rank
             FROM items
+            JOIN sources ON sources.key = items.source_key
             WHERE source_key = ?
               AND parent_key = ?
             ORDER BY
-                CASE structure_type WHEN 'folder' THEN 0 ELSE 1 END,
+                CASE
+                    WHEN sources.type != 'jira' AND structure_type = 'folder' THEN 0
+                    WHEN sources.type != 'jira' THEN 1
+                    ELSE 0
+                END,
+                CASE WHEN sources.type = 'jira' THEN items.modified_at END DESC,
                 title COLLATE NOCASE
             """,
             (source_key, parent_key),

@@ -267,6 +267,20 @@ def test_index_exposes_jira_project_root_and_epics(tmp_path: Path) -> None:
         snippet="Story | To Do | Add source selector.",
         parent_key="LAZY-1",
     )
+    old_story = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-0",
+        title="LAZY-0 - Earlier child ticket",
+        url="https://example.atlassian.net/browse/LAZY-0",
+        path="LAZY/LAZY-0",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T09:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Story | To Do | Older child ticket.",
+        parent_key="LAZY-1",
+    )
     bug = IndexedItem(
         source_key="jira",
         item_key="LAZY-3",
@@ -280,10 +294,23 @@ def test_index_exposes_jira_project_root_and_epics(tmp_path: Path) -> None:
         container="LAZY",
         snippet="Bug | To Do | Fix notification.",
     )
+    old_bug = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-00",
+        title="LAZY-00 - Earlier unparented bug",
+        url="https://example.atlassian.net/browse/LAZY-00",
+        path="LAZY/LAZY-00",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T08:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Bug | To Do | Older notification.",
+    )
 
     with Index(db_path) as index:
         index.upsert_source(source)
-        index.upsert_items([epic, story, bug])
+        index.upsert_items([epic, story, old_story, bug, old_bug])
         structure = index.jira_structure(source_key="jira")
         project_epics = index.jira_epic_structure(source_keys=["jira"])
         unparented = index.jira_unparented_structure(source_keys=["jira"])
@@ -294,17 +321,29 @@ def test_index_exposes_jira_project_root_and_epics(tmp_path: Path) -> None:
 
     assert [node.kind for node in structure] == ["jira-project", "epic", "unparented"]
     assert structure[0].name == "LAZY"
-    assert structure[0].count == 3
+    assert structure[0].count == 5
     assert structure[1].name == "LAZY-1 - Build document graph"
-    assert structure[1].count == 1
+    assert structure[1].count == 2
     assert structure[2].name == "Unparented"
-    assert structure[2].count == 1
+    assert structure[2].count == 2
     assert [node.name for node in project_epics] == ["LAZY-1 - Build document graph"]
     assert [node.name for node in unparented] == ["Unparented"]
-    assert [item.title for item in epic_children] == ["LAZY-2 - Add source selector"]
-    assert [item.title for item in unparented_items] == ["LAZY-3 - Fix stray notification"]
-    assert [item.title for item in overview] == ["LAZY-2 - Add source selector"]
-    assert [item.title for item in children] == ["LAZY-2 - Add source selector"]
+    assert [item.title for item in epic_children] == [
+        "LAZY-2 - Add source selector",
+        "LAZY-0 - Earlier child ticket",
+    ]
+    assert [item.title for item in unparented_items] == [
+        "LAZY-3 - Fix stray notification",
+        "LAZY-00 - Earlier unparented bug",
+    ]
+    assert [item.title for item in overview] == [
+        "LAZY-2 - Add source selector",
+        "LAZY-0 - Earlier child ticket",
+    ]
+    assert [item.title for item in children] == [
+        "LAZY-2 - Add source selector",
+        "LAZY-0 - Earlier child ticket",
+    ]
 
 
 def test_index_scopes_search_and_relationships_to_project_sources(tmp_path: Path) -> None:

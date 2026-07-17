@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import os
 import re
 import subprocess
@@ -8,11 +9,13 @@ import webbrowser
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
+import textwrap
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import Header, Input, Label, ListItem, ListView, Static
 
 from lazylens.config import configured_db_path, load_projects, load_sources, load_ui_config
@@ -114,10 +117,40 @@ ICON_SETS = {
 
 
 SOURCE_SHORTCUTS = "abdefghij"
+MODAL_WRAP_WIDTH = 72
 
 
 def icon_set(style: str) -> IconSet:
     return ICON_SETS.get(style, ICON_SETS["ascii"])
+
+
+def app_version() -> str:
+    try:
+        return importlib.metadata.version("lazylens")
+    except importlib.metadata.PackageNotFoundError:
+        version_file = Path(__file__).resolve().parent.parent / "VERSION"
+        if version_file.exists():
+            return version_file.read_text(encoding="utf-8").strip() or "0+unknown"
+        return "0+unknown"
+
+
+def commit_info() -> tuple[str, str]:
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        date = subprocess.check_output(
+            ["git", "show", "-s", "--format=%cI", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown", "unknown"
+    return commit or "unknown", date[:16].replace("T", " ") if date else "unknown"
 
 
 def result_icon(result: SearchResult, icons: IconSet, source_type: str) -> str:
@@ -185,6 +218,77 @@ class RelationItem(ListItem):
         super().__init__(Label(relation_label(item, icons), markup=False), disabled=item.item_id is None)
 
 
+class MessageModal(ModalScreen[None]):
+    DEFAULT_CSS = """
+    MessageModal {
+        align: center middle;
+        background: transparent;
+    }
+
+    MessageModal > Vertical {
+        width: 78;
+        max-width: 90%;
+        height: auto;
+        max-height: 85%;
+        background: #20242c;
+        border: round #d8a24c;
+        padding: 1 2;
+    }
+
+    MessageModal .title {
+        color: #d8a24c;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    MessageModal .muted {
+        color: #9ba3b1;
+    }
+
+    MessageModal Static {
+        height: auto;
+    }
+    """
+
+    def __init__(self, title: str, lines: list[str]) -> None:
+        super().__init__()
+        self.title = title
+        self.lines = lines
+
+    def wrapped_lines(self) -> list[str]:
+        wrapped: list[str] = []
+        for line in self.lines:
+            if not line:
+                wrapped.append("")
+                continue
+            subsequent_indent = ""
+            if ": " in line:
+                prefix = line.split(": ", 1)[0] + ": "
+                subsequent_indent = " " * len(prefix)
+            wrapped.extend(
+                textwrap.wrap(
+                    line,
+                    width=MODAL_WRAP_WIDTH,
+                    subsequent_indent=subsequent_indent,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                )
+            )
+        return wrapped
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static(self.title, classes="title")
+            for line in self.wrapped_lines():
+                yield Static(line, classes="muted" if line else "")
+            yield Static("")
+            yield Static("Any key to close", classes="muted")
+
+    def on_key(self, event) -> None:
+        event.stop()
+        self.dismiss(None)
+
+
 class LazylensApp(App[None]):
     TITLE = "lazylens"
     BINDINGS = [
@@ -196,6 +300,7 @@ class LazylensApp(App[None]):
         Binding("space", "follow_relation", "Follow", show=False),
         Binding("left", "back", "Back", show=False),
         Binding("backspace", "back", "Back", show=False),
+        Binding("?", "about", "About", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("1", "select_project(1)", "Project 1", show=False),
         Binding("2", "select_project(2)", "Project 2", show=False),
@@ -297,10 +402,21 @@ class LazylensApp(App[None]):
         border: solid #7a808b;
     }
 
-    #commands {
+    #command-bar {
         height: 1;
+    }
+
+    #commands {
+        width: 1fr;
         padding: 0 1;
         color: #9ba3b1;
+    }
+
+    #version {
+        width: 16;
+        padding: 0 1;
+        color: #9ba3b1;
+        text-align: right;
     }
 
     ListView > ListItem.--highlight {
@@ -348,14 +464,15 @@ class LazylensApp(App[None]):
                 yield ListView(id="outgoing")
                 yield Static(Text("Incoming"), id="incoming-title", classes="relation-title")
                 yield ListView(id="incoming")
-        yield Static(
-            Text(
-                "Structure: Enter | Open/Drill: Enter | Links: Right/Space | Follow Link: Enter/Right | "
-                "Project: 1-9 | Structure Source: a/b | Back: Left/Backspace | Search: / | "
-                "Clear Search: c | Refresh: r | Quit: q"
-            ),
-            id="commands",
-        )
+        with Horizontal(id="command-bar"):
+            yield Static(
+                Text(
+                    "Commands: Select/Open: Enter | Links: Right/Space | Follow Link: Enter/Right | "
+                    "Back: Left/Backspace | Search: / | Clear Search: c | Refresh: r | About: ? | Quit: q"
+                ),
+                id="commands",
+            )
+            yield Static(Text(f"v{app_version()}"), id="version")
 
     async def on_mount(self) -> None:
         self.configured_sources = load_sources(self.config_path)
@@ -521,6 +638,24 @@ class LazylensApp(App[None]):
         search.value = ""
         await self.refresh_results()
         self.query_one("#results", ListView).focus()
+
+    def action_about(self) -> None:
+        commit, commit_date = commit_info()
+        lines = [
+            "A fast local lens over work knowledge across Confluence, Jira, and local documents.",
+            "",
+            f"Version: {app_version()}",
+            f"Commit: {commit}",
+            f"Commit date: {commit_date}",
+            "License: MIT",
+            "",
+            "Created by Rich Lee, LeeSoft",
+            "Contact: Rich Lee <richalee@pm.me>",
+            "Built with OpenAI Codex",
+            "",
+            "Tech stack: Python, Textual, SQLite FTS, Confluence REST API, Jira REST API, local files.",
+        ]
+        self.push_screen(MessageModal("lazylens", lines))
 
     async def update_relations(self, result: SearchResult | None) -> None:
         incoming_list = self.query_one("#incoming", ListView)

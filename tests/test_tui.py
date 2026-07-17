@@ -3,12 +3,21 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from textual.widgets import Input, ListView
+from textual.widgets import Input, ListView, Static
 
 import lazylens.tui as tui
 from lazylens.db import Index
 from lazylens.models import CategorySummary, IndexedItem, RelatedItem, SearchResult, SourceConfig
-from lazylens.tui import LazylensApp, category_label, icon_set, item_type_icon, preview_text, relation_label
+from lazylens.tui import (
+    LazylensApp,
+    MessageModal,
+    app_version,
+    category_label,
+    icon_set,
+    item_type_icon,
+    preview_text,
+    relation_label,
+)
 
 
 def test_tui_loads_indexed_results(tmp_path: Path) -> None:
@@ -38,6 +47,42 @@ def test_tui_loads_indexed_results(tmp_path: Path) -> None:
             await pilot.pause()
             assert app.sources[0].name == "Local"
             assert app.results[0].title == "Architecture Notes"
+
+    asyncio.run(run_app())
+
+
+def test_tui_command_bar_is_concise_and_shows_version(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            commands = app.query_one("#commands", Static).render().plain
+            version = app.query_one("#version", Static).render().plain
+
+            assert commands.startswith("Commands:")
+            assert "Project: 1-9" not in commands
+            assert "Structure Source" not in commands
+            assert "About: ?" in commands
+            assert version == f"v{app_version()}"
+
+    asyncio.run(run_app())
+
+
+def test_tui_about_key_opens_about_modal(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("?")
+            await pilot.pause()
+
+            assert isinstance(app.screen, MessageModal)
+            assert app.screen.title == "lazylens"
+            assert any(line.startswith("Version:") for line in app.screen.lines)
 
     asyncio.run(run_app())
 

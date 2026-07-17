@@ -195,6 +195,7 @@ def item_type_icon(result: SearchResult, icons: IconSet) -> str:
 class CategoryItem(ListItem):
     def __init__(self, category: CategorySummary | None, icons: IconSet, source_type: str) -> None:
         self.category_key = category.key if category else None
+        self.source_key = category.source_key if category else None
         self.item_id = category.item_id if category else None
         self.kind = category.kind if category else "space"
         super().__init__(Label(category_label(category, icons, source_type), markup=False))
@@ -512,15 +513,28 @@ class LazylensApp(App[None]):
 
     async def refresh_categories(self) -> None:
         with Index(self.db_path) as index:
-            if self.selected_source_type() == "jira" and self.selected_source_key:
+            if self.source_results_active and self.selected_source_type() == "jira" and self.selected_source_key:
                 categories = index.jira_structure(source_key=self.selected_source_key)
-            else:
+            elif self.source_results_active:
                 categories = index.categories(source_key=self.selected_source_key)
-                categories = [
-                    *categories,
-                    *index.jira_epic_structure(source_keys=self.selected_project_source_keys()),
-                    *index.jira_unparented_structure(source_keys=self.selected_project_source_keys()),
+            else:
+                document_source_keys = [
+                    source.key
+                    for source in self.project_sources
+                    if source.type != "jira"
                 ]
+                categories = (
+                    index.categories(source_keys=document_source_keys)
+                    if document_source_keys
+                    else []
+                )
+                jira_categories = [
+                    category
+                    for source in self.project_sources
+                    if source.type == "jira"
+                    for category in index.jira_structure(source_key=source.key)
+                ]
+                categories = [*categories, *jira_categories]
         category_list = self.query_one("#categories", ListView)
         await category_list.clear()
         if not self.project_sources:
@@ -533,11 +547,11 @@ class LazylensApp(App[None]):
             CategoryItem(category, self.icons, self.category_source_type(category))
             for category in categories
         ]
-        if self.selected_source_type() != "jira":
-            category_items = [
-                CategoryItem(None, self.icons, self.selected_source_type()),
-                *category_items,
-            ]
+        all_source_type = self.selected_source_type() if self.source_results_active else ""
+        category_items = [
+            CategoryItem(None, self.icons, all_source_type),
+            *category_items,
+        ]
         await category_list.extend(category_items)
         category_list.index = 0
         self.selected_category_key = None
@@ -597,7 +611,7 @@ class LazylensApp(App[None]):
             return
         parts = []
         for shortcut, source in zip(SOURCE_SHORTCUTS, self.project_sources[:len(SOURCE_SHORTCUTS)]):
-            marker = "*" if source.key == self.selected_source_key else " "
+            marker = "*" if self.source_results_active and source.key == self.selected_source_key else " "
             icon = self.icons.source_for(source.type)
             label = f"{icon} {source.name}".strip()
             parts.append(f"[{shortcut}]{marker} {label} ({source.count})")
@@ -806,7 +820,9 @@ class LazylensApp(App[None]):
             return
         self.history.clear()
         self.result_stack.clear()
-        self.source_results_active = True
+        if isinstance(item, CategoryItem) and item.source_key:
+            self.selected_source_key = item.source_key
+            self.update_sources_row()
         self.selected_category_key = self.pending_category_key
         await self.refresh_results()
         self.query_one("#results", ListView).focus()

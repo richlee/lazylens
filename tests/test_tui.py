@@ -763,6 +763,7 @@ def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -
             categories = app.query_one("#categories", ListView)
 
             assert [getattr(item, "kind", "") for item in categories.children] == [
+                "space",
                 "jira-project",
                 "epic",
                 "unparented",
@@ -777,7 +778,7 @@ def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -
             assert [result.title for result in app.results] == ["LAZY-2 - Story"]
 
             categories.focus()
-            categories.index = 2
+            categories.index = 3
             await pilot.press("enter")
             await pilot.pause()
 
@@ -964,6 +965,7 @@ sources = ["dsp-beta", "DSPBeta"]
             assert [getattr(item, "kind", "") for item in categories.children] == [
                 "space",
                 "folder",
+                "jira-project",
                 "epic",
                 "unparented",
             ]
@@ -977,6 +979,12 @@ sources = ["dsp-beta", "DSPBeta"]
             await pilot.pause()
 
             assert app.selected_source_key == "DSPBeta"
+            assert [getattr(item, "kind", "") for item in categories.children] == [
+                "space",
+                "jira-project",
+                "epic",
+                "unparented",
+            ]
             assert [result.title for result in app.results] == [
                 "DSPBeta-1 - Build relationship view",
             ]
@@ -993,7 +1001,14 @@ sources = ["dsp-beta", "DSPBeta"]
             await pilot.pause()
 
             assert app.selected_source_key == "dsp-beta"
+            assert [getattr(item, "kind", "") for item in categories.children] == [
+                "space",
+                "folder",
+            ]
             assert [result.title for result in app.results] == ["DSP LLD"]
+
+            await pilot.press("b")
+            await pilot.pause()
 
             categories.focus()
             categories.index = 3
@@ -1001,5 +1016,21 @@ sources = ["dsp-beta", "DSPBeta"]
             await pilot.pause()
 
             assert [result.title for result in app.results] == ["DSPBeta-2 - Fix orphaned ticket"]
+
+            await pilot.press("1")
+            await pilot.pause()
+
+            assert app.source_results_active is False
+            assert [getattr(item, "kind", "") for item in categories.children] == [
+                "space",
+                "folder",
+                "jira-project",
+                "epic",
+                "unparented",
+            ]
+            assert [result.title for result in app.results] == [
+                "DSP LLD",
+                "DSPBeta-1 - Build relationship view",
+            ]
 
     asyncio.run(run_app())

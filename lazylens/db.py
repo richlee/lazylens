@@ -382,7 +382,13 @@ class Index:
             for row in rows
         ]
 
-    def categories(self, *, source_key: str | None = None) -> list[CategorySummary]:
+    def categories(
+        self,
+        *,
+        source_key: str | None = None,
+        source_keys: Iterable[str] | None = None,
+    ) -> list[CategorySummary]:
+        project_source_keys = sorted(set(source_keys or []))
         if source_key:
             rows = self.connection.execute(
                 """
@@ -414,6 +420,39 @@ class Index:
                 ORDER BY grouped.category COLLATE NOCASE
                 """,
                 (source_key,),
+            ).fetchall()
+        elif project_source_keys:
+            placeholders = ", ".join("?" for _source_key in project_source_keys)
+            rows = self.connection.execute(
+                f"""
+                SELECT grouped.source_key,
+                       grouped.category,
+                       grouped.count,
+                       top_level.id AS item_id,
+                       CASE
+                         WHEN top_level.id IS NULL THEN 'folder'
+                         WHEN EXISTS (
+                           SELECT 1
+                           FROM items AS child
+                           WHERE child.source_key = top_level.source_key
+                             AND child.parent_key = top_level.item_key
+                         ) THEN 'parent-page'
+                         ELSE top_level.structure_type
+                       END AS kind
+                FROM (
+                    SELECT source_key, category, COUNT(*) AS count
+                    FROM items
+                    WHERE source_key IN ({placeholders})
+                      AND structure_type = 'page'
+                    GROUP BY source_key, category
+                ) AS grouped
+                LEFT JOIN items AS top_level
+                  ON top_level.source_key = grouped.source_key
+                 AND top_level.title = grouped.category
+                 AND top_level.structure_type = 'page'
+                ORDER BY grouped.category COLLATE NOCASE
+                """,
+                tuple(project_source_keys),
             ).fetchall()
         else:
             rows = self.connection.execute(

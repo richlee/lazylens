@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 from rich.text import Text
@@ -204,31 +206,7 @@ class LazylensApp(App[None]):
         if result is None:
             preview.update(Text(self.empty_preview_text()))
             return
-        metadata = " | ".join(
-            part
-            for part in [
-                result.source_key,
-                result.category or "Uncategorised",
-                result.content_type,
-                result.modified_at,
-            ]
-            if part
-        )
-        lines = [
-            result.title,
-            metadata,
-            f"Owner: {result.owner}" if result.owner else "",
-            f"Path: {result.path}",
-            f"URL: {result.url}",
-            "",
-            result.snippet or "(no preview text available)",
-        ]
-        with Index(self.db_path) as index:
-            related = index.related_items(result.id)
-        if related:
-            lines.extend(["", "Related:"])
-            lines.extend(f"{item.direction}: {item.title}" for item in related)
-        preview.update(Text("\n".join(lines)))
+        preview.update(preview_text(result, self.query_text))
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "search":
@@ -363,3 +341,44 @@ def open_url(url: str) -> bool:
     except OSError:
         pass
     return webbrowser.open(url, new=2)
+
+
+def preview_text(result: SearchResult, query: str) -> Text:
+    terms = search_terms(query)
+    text = Text()
+    append_highlighted(text, result.title, terms, style="bold #d8a24c")
+    text.append("\n")
+    if result.modified_at:
+        text.append(f"Modified: {format_datetime(result.modified_at)}\n", style="#9ba3b1")
+    text.append(f"URL: {result.url}\n", style="#9ba3b1")
+    text.append("\n")
+    append_highlighted(text, result.snippet or "(no preview text available)", terms)
+    return text
+
+
+def append_highlighted(text: Text, value: str, terms: list[str], *, style: str | None = None) -> None:
+    start = len(text.plain)
+    text.append(value, style=style)
+    for term in terms:
+        for match in re.finditer(re.escape(term), value, flags=re.IGNORECASE):
+            text.stylize("bold #f4bf75", start + match.start(), start + match.end())
+
+
+def search_terms(query: str) -> list[str]:
+    terms = []
+    seen = set()
+    for term in re.findall(r"\w+", query):
+        lower_term = term.lower()
+        if lower_term in seen:
+            continue
+        seen.add(lower_term)
+        terms.append(term)
+    return terms
+
+
+def format_datetime(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return parsed.strftime("%Y-%m-%d %H:%M")

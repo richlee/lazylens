@@ -7,8 +7,8 @@ from textual.widgets import Input, ListView
 
 import lazylens.tui as tui
 from lazylens.db import Index
-from lazylens.models import IndexedItem, SourceConfig
-from lazylens.tui import LazylensApp
+from lazylens.models import IndexedItem, SearchResult, SourceConfig
+from lazylens.tui import LazylensApp, preview_text
 
 
 def test_tui_loads_indexed_results(tmp_path: Path) -> None:
@@ -40,6 +40,36 @@ def test_tui_loads_indexed_results(tmp_path: Path) -> None:
             assert app.results[0].title == "Architecture Notes"
 
     asyncio.run(run_app())
+
+
+def test_preview_text_formats_metadata_and_highlights_query() -> None:
+    result = SearchResult(
+        id=1,
+        source_key="local",
+        title="Architecture Notes",
+        url="file:///architecture.md",
+        path="/tmp/architecture.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T12:34:56+00:00",
+        owner="rich",
+        category="Architecture",
+        container="architecture",
+        snippet="Useful context about SharePoint and Confluence indexing.",
+        rank=0.0,
+    )
+
+    text = preview_text(result, "share")
+
+    assert text.plain == (
+        "Architecture Notes\n"
+        "Modified: 2026-07-16 12:34\n"
+        "URL: file:///architecture.md\n"
+        "\n"
+        "Useful context about SharePoint and Confluence indexing."
+    )
+    assert "local |" not in text.plain
+    assert "Owner:" not in text.plain
+    assert any(text.plain[span.start : span.end] == "Share" for span in text.spans)
 
 
 def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:

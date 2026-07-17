@@ -7,8 +7,8 @@ from textual.widgets import Input, ListView
 
 import lazylens.tui as tui
 from lazylens.db import Index
-from lazylens.models import IndexedItem, SearchResult, SourceConfig
-from lazylens.tui import LazylensApp, icon_set, item_type_icon, preview_text
+from lazylens.models import CategorySummary, IndexedItem, SearchResult, SourceConfig
+from lazylens.tui import LazylensApp, category_label, icon_set, item_type_icon, preview_text
 
 
 def test_tui_loads_indexed_results(tmp_path: Path) -> None:
@@ -78,7 +78,7 @@ def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
     nerd_icons = icon_set("nerd")
 
     assert ascii_icons.structure("parent-page") == "[P+]"
-    assert ascii_icons.structure("unparented") == "[?]"
+    assert ascii_icons.structure("unparented") == ""
     assert ascii_icons.project == ""
     assert ascii_icons.page == ""
     assert ascii_icons.source_for("confluence") == "[C]"
@@ -87,6 +87,35 @@ def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
     assert nerd_icons.structure("parent-page") == "\uf07c"
     assert nerd_icons.source_for("confluence") == "\uf0ac"
     assert nerd_icons.source_for("jira") == "\uf0ae"
+
+
+def test_category_label_prefixes_structure_rows_with_source_icons() -> None:
+    confluence = CategorySummary(
+        key="Architecture",
+        name="Architecture",
+        count=3,
+        source_key="conf",
+        kind="folder",
+    )
+    unparented = CategorySummary(
+        key="jira:unparented",
+        name="Unparented",
+        count=2,
+        source_key="jira",
+        kind="unparented",
+    )
+    jira_root = CategorySummary(
+        key="jira:jira-root",
+        name="LAZY",
+        count=8,
+        source_key="jira",
+        kind="jira-project",
+    )
+
+    assert category_label(None, icon_set("ascii"), "confluence") == "[C] All"
+    assert category_label(confluence, icon_set("ascii"), "confluence") == "[C] [F] Architecture (3)"
+    assert category_label(jira_root, icon_set("ascii"), "jira") == "[Ji] LAZY (8)"
+    assert category_label(unparented, icon_set("ascii"), "jira") == "[Ji] Unparented (2)"
 
 
 def test_jira_bug_uses_bug_icon_in_nerd_font() -> None:

@@ -40,6 +40,7 @@ class CategorySummary:
     key: str
     name: str
     count: int
+    source_key: str = ""
     kind: str = "folder"
     item_id: int | None = None
 

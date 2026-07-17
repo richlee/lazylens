@@ -47,7 +47,7 @@ class IconSet:
 
     def structure(self, kind: str) -> str:
         if kind == "unparented":
-            return "[?]" if self is ICON_SETS["ascii"] else "?"
+            return ""
         if kind == "jira-project":
             return self.jira_source
         if kind == "epic":
@@ -126,6 +126,16 @@ def result_icon(result: SearchResult, icons: IconSet, source_type: str) -> str:
     return " ".join(part for part in [source_icon, type_icon] if part).strip()
 
 
+def category_label(category: CategorySummary | None, icons: IconSet, source_type: str) -> str:
+    label = "All" if category is None else category.name
+    count = "" if category is None else f" ({category.count})"
+    source_icon = icons.source_for(source_type)
+    type_icon = "" if category is None else icons.structure(category.kind)
+    if type_icon == source_icon:
+        type_icon = ""
+    return " ".join(part for part in [source_icon, type_icon, f"{label}{count}"] if part).strip()
+
+
 def item_type_icon(result: SearchResult, icons: IconSet) -> str:
     if result.content_type == "application/vnd.atlassian.jira.issue":
         issue_type = result.snippet.split("|", 1)[0].strip().lower().rstrip(".")
@@ -144,13 +154,11 @@ def item_type_icon(result: SearchResult, icons: IconSet) -> str:
 
 
 class CategoryItem(ListItem):
-    def __init__(self, category: CategorySummary | None, icons: IconSet) -> None:
+    def __init__(self, category: CategorySummary | None, icons: IconSet, source_type: str) -> None:
         self.category_key = category.key if category else None
         self.item_id = category.item_id if category else None
         self.kind = category.kind if category else "space"
-        label = "All" if category is None else category.name
-        count = "" if category is None else f" ({category.count})"
-        super().__init__(Label(f"{icons.structure(self.kind)} {label}{count}", markup=False))
+        super().__init__(Label(category_label(category, icons, source_type), markup=False))
 
 
 class ResultItem(ListItem):
@@ -401,9 +409,15 @@ class LazylensApp(App[None]):
             self.selected_category_key = None
             await self.refresh_results()
             return
-        category_items = [CategoryItem(category, self.icons) for category in categories]
+        category_items = [
+            CategoryItem(category, self.icons, self.category_source_type(category))
+            for category in categories
+        ]
         if self.selected_source_type() != "jira":
-            category_items = [CategoryItem(None, self.icons), *category_items]
+            category_items = [
+                CategoryItem(None, self.icons, self.selected_source_type()),
+                *category_items,
+            ]
         await category_list.extend(category_items)
         category_list.index = 0
         self.selected_category_key = None
@@ -826,6 +840,9 @@ class LazylensApp(App[None]):
 
     def source_type(self, result: SearchResult) -> str:
         return self.source_types.get(result.source_key, "local")
+
+    def category_source_type(self, category: CategorySummary) -> str:
+        return self.source_types.get(category.source_key or self.selected_source_key or "", "local")
 
     def selected_source_type(self) -> str:
         return self.source_types.get(self.selected_source_key or "", "local")

@@ -386,7 +386,8 @@ class Index:
         if source_key:
             rows = self.connection.execute(
                 """
-                SELECT grouped.category,
+                SELECT grouped.source_key,
+                       grouped.category,
                        grouped.count,
                        top_level.id AS item_id,
                        CASE
@@ -400,24 +401,25 @@ class Index:
                          ELSE top_level.structure_type
                        END AS kind
                 FROM (
-                    SELECT category, COUNT(*) AS count
+                    SELECT source_key, category, COUNT(*) AS count
                     FROM items
                     WHERE source_key = ?
                       AND structure_type = 'page'
-                    GROUP BY category
+                    GROUP BY source_key, category
                 ) AS grouped
                 LEFT JOIN items AS top_level
-                  ON top_level.source_key = ?
+                  ON top_level.source_key = grouped.source_key
                  AND top_level.title = grouped.category
                  AND top_level.structure_type = 'page'
                 ORDER BY grouped.category COLLATE NOCASE
                 """,
-                (source_key, source_key),
+                (source_key,),
             ).fetchall()
         else:
             rows = self.connection.execute(
                 """
-                SELECT grouped.category,
+                SELECT grouped.source_key,
+                       grouped.category,
                        grouped.count,
                        top_level.id AS item_id,
                        CASE
@@ -431,13 +433,14 @@ class Index:
                          ELSE top_level.structure_type
                        END AS kind
                 FROM (
-                    SELECT category, COUNT(*) AS count
+                    SELECT source_key, category, COUNT(*) AS count
                     FROM items
                     WHERE structure_type = 'page'
-                    GROUP BY category
+                    GROUP BY source_key, category
                 ) AS grouped
                 LEFT JOIN items AS top_level
-                  ON top_level.title = grouped.category
+                  ON top_level.source_key = grouped.source_key
+                 AND top_level.title = grouped.category
                  AND top_level.structure_type = 'page'
                 ORDER BY grouped.category COLLATE NOCASE
                 """
@@ -447,6 +450,7 @@ class Index:
                 key=str(row["category"]),
                 name=str(row["category"]) or "Uncategorised",
                 count=int(row["count"]),
+                source_key=str(row["source_key"]),
                 kind=str(row["kind"]),
                 item_id=int(row["item_id"]) if row["item_id"] is not None else None,
             )
@@ -480,6 +484,7 @@ class Index:
             key=f"{source_key}:jira-root",
             name=root_name,
             count=int(source["count"]),
+            source_key=source_key,
             kind="jira-project",
         )
         rows = self.connection.execute(
@@ -506,6 +511,7 @@ class Index:
                 key=str(row["item_key"]),
                 name=str(row["title"]),
                 count=int(row["child_count"]),
+                source_key=source_key,
                 kind="epic",
                 item_id=int(row["id"]),
             )
@@ -546,6 +552,7 @@ class Index:
                 key=f"{row['source_key']}:{row['item_key']}",
                 name=str(row["title"]),
                 count=int(row["child_count"]),
+                source_key=str(row["source_key"]),
                 kind="epic",
                 item_id=int(row["id"]),
             )
@@ -589,6 +596,7 @@ class Index:
                 key=f"{row['source_key']}:unparented",
                 name="Unparented" if len(rows) == 1 else f"Unparented - {row['name']}",
                 count=int(row["count"]),
+                source_key=str(row["source_key"]),
                 kind="unparented",
             )
             for row in rows

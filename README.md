@@ -4,13 +4,15 @@
 
 A fast terminal lens over work knowledge.
 
-`lazylens` builds a local SQLite/FTS index for project documents, then gives you
-a keyboard-first Textual TUI for search, structure navigation, previews, and
-document relationships. It currently supports local folders, Confluence Cloud,
-and Jira Cloud. SharePoint is planned next.
+`lazylens` builds a local SQLite/FTS index over work knowledge, then gives you
+a keyboard-first Textual TUI for search, source structure, previews, and
+cross-linked document relationships.
 
-It is useful when you want to explore work documents quickly without waiting on
-browser search, full sync clients, or heavyweight document UIs.
+The intended first use case is an Atlassian project: Confluence pages provide
+the design/document structure, Jira issues provide delivery detail, and
+relationships let you navigate between them without losing the source context.
+Local folders are also supported for notes, demos, and non-cloud documents.
+SharePoint is planned next.
 
 ## Screenshot
 
@@ -19,18 +21,18 @@ browser search, full sync clients, or heavyweight document UIs.
 ## Features
 
 - Local SQLite index with FTS5 search.
-- Local folder indexing for Markdown, text, and other readable project files.
 - Confluence Cloud indexing with page hierarchy, folders, snippets, and links.
 - Jira Cloud indexing with issues, hierarchy, snippets, and linked issues.
+- Cross-source relationship navigation: Confluence pages can lead into Jira
+  Epics/Stories/Bugs and Jira issues can lead back to Confluence LLDs/KDDs.
+- Local folder indexing for Markdown, text, and other readable project files.
 - TUI structure navigation: source, top-level pages, folders, and child pages.
-- Relationship navigation: outgoing and incoming links remain global across
-  sources, so Confluence pages can lead into Jira issues and back.
 - Browser/file opening from the selected page.
 - Optional Nerd Font icon mode for richer terminal presentation.
 
 ## Install
 
-From PyPI, once published:
+From PyPI:
 
 ```sh
 pipx install lazylens
@@ -59,18 +61,39 @@ py -m venv .venv
 
 ## Quick Start
 
-Create a local demo source and open the TUI:
+For a real Atlassian project, configure Confluence and Jira as separate sources
+that share the same Atlassian env file:
 
 ```sh
-lazylens demo
+lazylens init confluence \
+  --base-url "https://example.atlassian.net" \
+  --email "you@example.com" \
+  --space-key ARCH
+
+lazylens init jira \
+  --base-url "https://example.atlassian.net" \
+  --email "you@example.com" \
+  --project-key ARCH
+```
+
+Edit the generated env file and paste your Atlassian API token:
+
+```sh
+${EDITOR:-vi} ~/.config/lazylens/atlassian.env
+source ~/.config/lazylens/atlassian.env
+lazylens doctor
+lazylens index
 lazylens
 ```
 
-For your own local folder:
+Inside the TUI, sources remain separate in the top row. The structure pane stays
+source-specific, while the outgoing/incoming relationship panes can cross
+between Confluence and Jira.
+
+For a no-credentials demo:
 
 ```sh
-lazylens init --root ~/Documents/notes --name Notes --key notes
-lazylens index
+lazylens demo
 lazylens
 ```
 
@@ -83,13 +106,33 @@ lazylens search architecture
 lazylens
 ```
 
-## Confluence Setup
+## Atlassian Setup
 
-`lazylens` uses Atlassian API-token basic auth for Confluence Cloud. Search in
-the TUI remains local; the Confluence API is used only to refresh the SQLite
-index.
+`lazylens` uses Atlassian API-token basic auth for Confluence Cloud and Jira
+Cloud. Remote APIs are used only to refresh the local SQLite index; TUI search
+and navigation read from local data.
 
-Generate config and an env-file skeleton:
+Credentials belong in:
+
+```sh
+~/.config/lazylens/atlassian.env
+```
+
+Source scope belongs in:
+
+```sh
+~/.config/lazylens/config.toml
+```
+
+Token values should stay out of `config.toml` and out of source control.
+
+For personal or non-client testing, create a small Atlassian Cloud site, add a
+Confluence space and Jira project, create an API token from your Atlassian
+account security settings, then run `lazylens doctor` before indexing.
+
+### Confluence Source
+
+Generate or append a Confluence source:
 
 ```sh
 lazylens init confluence \
@@ -98,29 +141,16 @@ lazylens init confluence \
   --space-key ARCH
 ```
 
-Edit the generated env file and paste an Atlassian API token:
+Then:
 
 ```sh
-${EDITOR:-vi} ~/.config/lazylens/atlassian.env
 source ~/.config/lazylens/atlassian.env
-lazylens doctor
 lazylens index personal-confluence
-lazylens
 ```
 
-The token should stay in `~/.config/lazylens/atlassian.env` or your shell
-environment, not in `config.toml`.
+### Jira Source
 
-For personal or non-client testing, create a small Atlassian Cloud site, add a
-dedicated space, create an API token from your Atlassian account security
-settings, then run `lazylens doctor` before indexing.
-
-## Jira Setup
-
-Jira uses the same Atlassian API-token auth pattern. The API is used only to
-refresh the local SQLite index; TUI search and navigation stay local.
-
-Generate config and append Jira entries to the Atlassian env file:
+Generate or append a Jira source:
 
 ```sh
 lazylens init jira \
@@ -129,18 +159,28 @@ lazylens init jira \
   --project-key LAZY
 ```
 
-Edit the env file and paste an Atlassian API token:
+Then:
 
 ```sh
-${EDITOR:-vi} ~/.config/lazylens/atlassian.env
 source ~/.config/lazylens/atlassian.env
-lazylens doctor
 lazylens index personal-jira
-lazylens
 ```
 
 By default, Jira config uses `project_keys` to build a JQL query. You can use a
 custom `jql` value in `config.toml` when you need a narrower scope.
+
+Jira snippets and embedded links come from the first configured description
+field that contains content. This supports projects that use custom fields such
+as `Description (DSP)` instead of the standard Jira `description` field.
+
+### Local Folder Source
+
+Local folders are useful for notes, exported documents, or demos:
+
+```sh
+lazylens init --root ~/Documents/notes --name Notes --key notes
+lazylens index notes
+```
 
 ## Configuration
 

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 from lazylens.cli import main
+
+
+def toml_string(value: Path | str) -> str:
+    return json.dumps(str(value))
 
 
 def test_cli_indexes_and_searches_local_source(tmp_path: Path, capsys) -> None:
@@ -13,12 +19,12 @@ def test_cli_indexes_and_searches_local_source(tmp_path: Path, capsys) -> None:
     db = tmp_path / "index.sqlite3"
     config.write_text(
         f"""
-database = "{db}"
+database = {toml_string(db)}
 
 [sources.local]
 name = "Local"
 type = "local"
-root = "{root}"
+root = {toml_string(root)}
 """
     )
 
@@ -41,8 +47,8 @@ def test_cli_init_writes_starter_config(tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
     text = config.read_text()
     assert "Wrote config" in output
-    assert f'database = "{db}"' in text
-    assert f'root = "{root}"' in text
+    assert f"database = {toml_string(db)}" in text
+    assert f"root = {toml_string(root)}" in text
 
 
 def test_cli_init_confluence_writes_config_and_env_skeleton(tmp_path: Path, capsys) -> None:
@@ -76,7 +82,7 @@ def test_cli_init_confluence_writes_config_and_env_skeleton(tmp_path: Path, caps
     config_text = config.read_text()
     env_text = env_file.read_text()
     assert "Confluence source: personal-confluence (ARCH)" in output
-    assert f'database = "{db}"' in config_text
+    assert f"database = {toml_string(db)}" in config_text
     assert '[sources."personal-confluence"]' in config_text
     assert 'name = "Personal Confluence"' in config_text
     assert 'type = "confluence"' in config_text
@@ -84,7 +90,8 @@ def test_cli_init_confluence_writes_config_and_env_skeleton(tmp_path: Path, caps
     assert 'export CONFLUENCE_BASE_URL="https://example.atlassian.net"' in env_text
     assert 'export CONFLUENCE_EMAIL="you@example.com"' in env_text
     assert 'export CONFLUENCE_API_TOKEN=""' in env_text
-    assert oct(env_file.stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":
+        assert oct(env_file.stat().st_mode & 0o777) == "0o600"
 
 
 def test_cli_demo_creates_searchable_demo_source(tmp_path: Path, capsys) -> None:
@@ -109,7 +116,7 @@ def test_cli_demo_uses_existing_config_database(tmp_path: Path, capsys) -> None:
     config = tmp_path / "config.toml"
     db = tmp_path / "custom.sqlite3"
     demo_root = tmp_path / "demo-docs"
-    config.write_text(f'database = "{db}"\n')
+    config.write_text(f"database = {toml_string(db)}\n")
 
     assert main(["--config", str(config), "demo", "--root", str(demo_root)]) == 0
     assert main(["--config", str(config), "search", "gateway"]) == 0
@@ -125,7 +132,7 @@ def test_cli_doctor_hints_at_confluence_env_file(tmp_path: Path, capsys, monkeyp
     db = tmp_path / "index.sqlite3"
     config.write_text(
         f"""
-database = "{db}"
+database = {toml_string(db)}
 
 [sources.personal]
 name = "Personal Confluence"
@@ -152,7 +159,7 @@ def test_cli_index_reports_missing_confluence_env_vars(tmp_path: Path, capsys, m
     db = tmp_path / "index.sqlite3"
     config.write_text(
         f"""
-database = "{db}"
+database = {toml_string(db)}
 
 [sources.personal]
 name = "Personal Confluence"

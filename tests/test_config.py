@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from lazylens.config import ConfigError, configured_db_path, load_sources, load_ui_config
+
+
+def toml_string(value: Path | str) -> str:
+    return json.dumps(str(value))
 
 
 def test_load_sources_from_config(tmp_path: Path) -> None:
@@ -13,12 +18,12 @@ def test_load_sources_from_config(tmp_path: Path) -> None:
     config = tmp_path / "config.toml"
     config.write_text(
         f"""
-database = "{tmp_path / "index.sqlite3"}"
+database = {toml_string(tmp_path / "index.sqlite3")}
 
 [sources.notes]
 name = "Notes"
 type = "local"
-root = "{root}"
+root = {toml_string(root)}
 
 [sources.work]
 name = "Work Confluence"

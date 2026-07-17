@@ -79,7 +79,7 @@ def test_icon_sets_keep_ascii_default_and_support_nerd_font() -> None:
 
     assert ascii_icons.structure("parent-page") == "[P+]"
     assert ascii_icons.page == ""
-    assert ascii_icons.source_for("confluence") == ""
+    assert ascii_icons.source_for("confluence") == "[C]"
     assert nerd_icons.structure("parent-page") == "\uf07c"
     assert nerd_icons.source_for("confluence") == "\uf0ac"
 
@@ -647,5 +647,105 @@ def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
             assert len(app.results) == 2
             assert highlighted is not None
             assert getattr(highlighted, "result").title == "Product Overview"
+
+    asyncio.run(run_app())
+
+
+def test_tui_project_scopes_results_and_source_scopes_structure(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""
+database = "{db_path}"
+
+[sources."dsp-beta"]
+name = "DSP Beta Confluence"
+type = "confluence"
+space_keys = ["dsp-beta"]
+
+[sources."DSPBeta"]
+name = "DSP Beta Jira"
+type = "jira"
+project_keys = ["DSPBeta"]
+
+[sources.other]
+name = "Other"
+type = "local"
+
+[projects.dsp]
+name = "DSP"
+sources = ["dsp-beta", "DSPBeta"]
+"""
+    )
+    confluence_source = SourceConfig(key="dsp-beta", name="DSP Beta Confluence", type="confluence")
+    jira_source = SourceConfig(key="DSPBeta", name="DSP Beta Jira", type="jira")
+    other_source = SourceConfig(key="other", name="Other", type="local")
+    lld = IndexedItem(
+        source_key="dsp-beta",
+        item_key="lld",
+        title="DSP LLD",
+        url="https://example.atlassian.net/wiki/spaces/dsp-beta/pages/1/DSP+LLD",
+        path="dsp-beta/DSP LLD",
+        content_type="text/html",
+        modified_at="2026-07-17T10:00:00+00:00",
+        owner="",
+        category="Product",
+        container="dsp-beta",
+        snippet="DSP architecture design.",
+    )
+    story = IndexedItem(
+        source_key="DSPBeta",
+        item_key="DSPBeta-1",
+        title="DSPBeta-1 - Build relationship view",
+        url="https://example.atlassian.net/browse/DSPBeta-1",
+        path="DSPBeta/DSPBeta-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T11:00:00+00:00",
+        owner="",
+        category="DSP Beta",
+        container="DSPBeta",
+        snippet="Story | To Do | Build a relationship view for the DSP project.",
+    )
+    outside = IndexedItem(
+        source_key="other",
+        item_key="other",
+        title="Outside DSP Note",
+        url="file:///outside",
+        path="/tmp/outside",
+        content_type="text/markdown",
+        modified_at="2026-07-17T12:00:00+00:00",
+        owner="",
+        category="Other",
+        container="Other",
+        snippet="DSP text outside selected project.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(confluence_source)
+        index.upsert_source(jira_source)
+        index.upsert_source(other_source)
+        index.upsert_items([lld, story, outside])
+
+    async def run_app() -> None:
+        app = LazylensApp(config_path=config_path, db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.projects[0].name == "DSP"
+            assert [source.key for source in app.project_sources] == ["dsp-beta", "DSPBeta"]
+            assert {result.title for result in app.results} == {
+                "DSP LLD",
+                "DSPBeta-1 - Build relationship view",
+            }
+            assert all(result.source_key != "other" for result in app.results)
+
+            await pilot.press("b")
+            await pilot.pause()
+
+            assert app.selected_source_key == "DSPBeta"
+            assert {result.title for result in app.results} == {
+                "DSP LLD",
+                "DSPBeta-1 - Build relationship view",
+            }
 
     asyncio.run(run_app())

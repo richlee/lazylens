@@ -221,7 +221,15 @@ project_keys = ["LAZY"]
 description_fields = ["description"]
 issue_limit = 100
 max_pages = 5
+
+[projects.arch]
+name = "Architecture"
+sources = ["personal-confluence", "personal-jira"]
 ```
+
+Projects group separately named sources into one working context. Search and
+relationship navigation use the selected project; the selected source controls
+the Structure panel.
 
 For Confluence, `space_keys` is usually the friendliest scope to configure. You
 can also configure `space_ids` if you already know them. `page_limit` controls

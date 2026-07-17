@@ -235,3 +235,63 @@ def test_index_resolves_links_across_sources(tmp_path: Path) -> None:
     assert epic_incoming[0].title == "HLD"
     assert epic_outgoing[0].title == "HLD"
     assert hld_incoming[0].title == "LAZY-1 - Build document graph"
+
+
+def test_index_scopes_search_and_relationships_to_project_sources(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    confluence_source = SourceConfig(key="conf", name="Confluence", type="confluence")
+    jira_source = SourceConfig(key="jira", name="Jira", type="jira")
+    other_source = SourceConfig(key="other", name="Other", type="local")
+    hld = IndexedItem(
+        source_key="conf",
+        item_key="123",
+        title="HLD",
+        url="https://example.atlassian.net/wiki/spaces/ARCH/pages/123/HLD",
+        path="ARCH/HLD",
+        content_type="text/html",
+        modified_at="2026-07-17T10:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="ARCH",
+        snippet="High level design.",
+        links=("https://example.atlassian.net/browse/LAZY-1",),
+    )
+    epic = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-1",
+        title="LAZY-1 - Build document graph",
+        url="https://example.atlassian.net/browse/LAZY-1",
+        path="LAZY/LAZY-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T10:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Epic.",
+    )
+    outside = IndexedItem(
+        source_key="other",
+        item_key="outside.md",
+        title="Outside HLD Reference",
+        url="file:///outside.md",
+        path="/tmp/outside.md",
+        content_type="text/markdown",
+        modified_at="2026-07-17T10:45:00+00:00",
+        owner="",
+        category="Other",
+        container="Other",
+        snippet="High level design outside the project.",
+        links=("https://example.atlassian.net/browse/LAZY-1",),
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(confluence_source)
+        index.upsert_source(jira_source)
+        index.upsert_source(other_source)
+        index.upsert_items([hld, epic, outside])
+        project_results = index.search("HLD", source_keys=["conf", "jira"])
+        epic_result = index.search("LAZY", source_keys=["conf", "jira"])[0]
+        incoming = index.incoming_links(epic_result.id, source_keys=["conf", "jira"])
+
+    assert [result.title for result in project_results] == ["HLD"]
+    assert [item.title for item in incoming] == ["HLD"]

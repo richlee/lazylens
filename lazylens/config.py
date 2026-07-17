@@ -3,7 +3,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from lazylens.models import SourceConfig, UiConfig
+from lazylens.models import ProjectConfig, SourceConfig, UiConfig
 from lazylens.paths import default_config_path, default_db_path
 
 
@@ -43,6 +43,55 @@ def load_sources(config_path: str | Path | None = None) -> list[SourceConfig]:
             )
         )
     return sources
+
+
+def load_projects(
+    config_path: str | Path | None = None,
+    *,
+    sources: list[SourceConfig] | None = None,
+) -> list[ProjectConfig]:
+    path = Path(config_path).expanduser() if config_path else default_config_path()
+    source_configs = sources if sources is not None else load_sources(config_path)
+    source_keys = tuple(source.key for source in source_configs)
+    if not path.exists():
+        return default_projects(source_keys)
+
+    data = tomllib.loads(path.read_text())
+    projects_data = data.get("projects", {})
+    if not projects_data:
+        return default_projects(source_keys)
+    if not isinstance(projects_data, dict):
+        raise ConfigError("[projects] must be a TOML table")
+
+    projects: list[ProjectConfig] = []
+    known_source_keys = set(source_keys)
+    for key, values in projects_data.items():
+        if not isinstance(values, dict):
+            continue
+        configured_sources = values.get("sources")
+        if not isinstance(configured_sources, list):
+            raise ConfigError(f"[projects.{key}].sources must be a list")
+        project_source_keys = tuple(
+            str(source_key)
+            for source_key in configured_sources
+            if str(source_key) in known_source_keys
+        )
+        if not project_source_keys:
+            continue
+        projects.append(
+            ProjectConfig(
+                key=str(key),
+                name=str(values.get("name", str(key).replace("-", " ").title())),
+                source_keys=project_source_keys,
+            )
+        )
+    return projects
+
+
+def default_projects(source_keys: tuple[str, ...]) -> list[ProjectConfig]:
+    if not source_keys:
+        return []
+    return [ProjectConfig(key="all", name="All Sources", source_keys=source_keys)]
 
 
 def load_ui_config(config_path: str | Path | None = None) -> UiConfig:

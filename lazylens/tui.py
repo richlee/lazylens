@@ -15,16 +15,25 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Input, Label, ListItem, ListView, Static
 
-from lazylens.config import configured_db_path, load_sources, load_ui_config
+from lazylens.config import configured_db_path, load_projects, load_sources, load_ui_config
 from lazylens.db import Index
 from lazylens.indexers.adapters import IndexingError
 from lazylens.indexing import refresh_source
-from lazylens.models import CategorySummary, RelatedItem, SearchResult, SourceConfig, SourceSummary, UiConfig
+from lazylens.models import (
+    CategorySummary,
+    ProjectConfig,
+    RelatedItem,
+    SearchResult,
+    SourceConfig,
+    SourceSummary,
+    UiConfig,
+)
 from lazylens.paths import default_config_path
 
 
 @dataclass(frozen=True)
 class IconSet:
+    project: str
     space: str
     parent_page: str
     page: str
@@ -57,6 +66,7 @@ class IconSet:
 
 ICON_SETS = {
     "ascii": IconSet(
+        project="[P]",
         space="[S]",
         parent_page="[P+]",
         page="",
@@ -65,10 +75,11 @@ ICON_SETS = {
         external_link="[ext]",
         source="",
         local_source="",
-        confluence_source="",
-        jira_source="",
+        confluence_source="[C]",
+        jira_source="[J]",
     ),
     "unicode": IconSet(
+        project="\u25c9",
         space="\u25a3",
         parent_page="\u25b8",
         page="\u25a1",
@@ -81,6 +92,7 @@ ICON_SETS = {
         jira_source="\u25c8",
     ),
     "nerd": IconSet(
+        project="\uf542",
         space="\uf0ac",
         parent_page="\uf07c",
         page="\uf15b",
@@ -95,8 +107,30 @@ ICON_SETS = {
 }
 
 
+SOURCE_SHORTCUTS = "abdefghij"
+
+
 def icon_set(style: str) -> IconSet:
     return ICON_SETS.get(style, ICON_SETS["ascii"])
+
+
+def result_icon(result: SearchResult, icons: IconSet, source_type: str) -> str:
+    source_icon = icons.source_for(source_type)
+    type_icon = item_type_icon(result, icons)
+    return " ".join(part for part in [source_icon, type_icon] if part).strip()
+
+
+def item_type_icon(result: SearchResult, icons: IconSet) -> str:
+    if result.content_type == "application/vnd.atlassian.jira.issue":
+        issue_type = result.snippet.split("|", 1)[0].strip().lower()
+        if issue_type == "epic":
+            return "[E]" if icons is ICON_SETS["ascii"] else "\u2b22"
+        if issue_type == "story":
+            return "[S]" if icons is ICON_SETS["ascii"] else "\u25aa"
+        if issue_type == "bug":
+            return "[B]" if icons is ICON_SETS["ascii"] else "!"
+        return "[T]" if icons is ICON_SETS["ascii"] else "\u25ab"
+    return icons.structure(result.structure_type)
 
 
 class CategoryItem(ListItem):
@@ -110,9 +144,9 @@ class CategoryItem(ListItem):
 
 
 class ResultItem(ListItem):
-    def __init__(self, result: SearchResult, icons: IconSet) -> None:
+    def __init__(self, result: SearchResult, icons: IconSet, source_type: str) -> None:
         self.result = result
-        icon = icons.structure(result.structure_type)
+        icon = result_icon(result, icons, source_type)
         super().__init__(Label(f"{icon} {result.title}".strip(), markup=False))
 
 
@@ -143,15 +177,24 @@ class LazylensApp(App[None]):
         Binding("left", "back", "Back", show=False),
         Binding("backspace", "back", "Back", show=False),
         Binding("q", "quit", "Quit", show=False),
-        Binding("1", "select_source(1)", "Source 1", show=False),
-        Binding("2", "select_source(2)", "Source 2", show=False),
-        Binding("3", "select_source(3)", "Source 3", show=False),
-        Binding("4", "select_source(4)", "Source 4", show=False),
-        Binding("5", "select_source(5)", "Source 5", show=False),
-        Binding("6", "select_source(6)", "Source 6", show=False),
-        Binding("7", "select_source(7)", "Source 7", show=False),
-        Binding("8", "select_source(8)", "Source 8", show=False),
-        Binding("9", "select_source(9)", "Source 9", show=False),
+        Binding("1", "select_project(1)", "Project 1", show=False),
+        Binding("2", "select_project(2)", "Project 2", show=False),
+        Binding("3", "select_project(3)", "Project 3", show=False),
+        Binding("4", "select_project(4)", "Project 4", show=False),
+        Binding("5", "select_project(5)", "Project 5", show=False),
+        Binding("6", "select_project(6)", "Project 6", show=False),
+        Binding("7", "select_project(7)", "Project 7", show=False),
+        Binding("8", "select_project(8)", "Project 8", show=False),
+        Binding("9", "select_project(9)", "Project 9", show=False),
+        Binding("a", "select_source_shortcut('a')", "Source a", show=False),
+        Binding("b", "select_source_shortcut('b')", "Source b", show=False),
+        Binding("d", "select_source_shortcut('d')", "Source d", show=False),
+        Binding("e", "select_source_shortcut('e')", "Source e", show=False),
+        Binding("f", "select_source_shortcut('f')", "Source f", show=False),
+        Binding("g", "select_source_shortcut('g')", "Source g", show=False),
+        Binding("h", "select_source_shortcut('h')", "Source h", show=False),
+        Binding("i", "select_source_shortcut('i')", "Source i", show=False),
+        Binding("j", "select_source_shortcut('j')", "Source j", show=False),
     ]
     CSS = """
     Screen {
@@ -159,10 +202,16 @@ class LazylensApp(App[None]):
         color: #d7d4ca;
     }
 
-    #sources {
+    #projects {
         height: 1;
         padding: 0 1;
         color: #d8a24c;
+    }
+
+    #sources {
+        height: 1;
+        padding: 0 1;
+        color: #b7c7d9;
     }
 
     #search {
@@ -246,10 +295,14 @@ class LazylensApp(App[None]):
         self.db_path = Path(db_path).expanduser() if db_path else configured_db_path(config_path)
         self.display_config_path = Path(config_path).expanduser() if config_path else default_config_path()
         self.sources: list[SourceSummary] = []
+        self.source_types: dict[str, str] = {}
+        self.project_sources: list[SourceSummary] = []
         self.configured_sources: list[SourceConfig] = []
+        self.projects: list[ProjectConfig] = []
         self.ui_config = UiConfig()
         self.icons = icon_set(self.ui_config.icon_style)
         self.results: list[SearchResult] = []
+        self.selected_project_key: str | None = None
         self.selected_source_key: str | None = None
         self.selected_category_key: str | None = None
         self.pending_category_key: str | None = None
@@ -259,6 +312,7 @@ class LazylensApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Static(Text("Projects: none configured"), id="projects")
         yield Static(Text("Sources: none indexed"), id="sources")
         yield Input(placeholder="Search", id="search")
         with Horizontal(id="body"):
@@ -277,13 +331,15 @@ class LazylensApp(App[None]):
         yield Static(
             Text(
                 "Structure: Enter | Open/Drill: Enter | Links: Right/Space | Follow Link: Enter/Right | "
-                "Back: Left/Backspace | Search: / | Clear Search: c | Refresh: r | Quit: q"
+                "Project: 1-9 | Structure Source: a/b | Back: Left/Backspace | Search: / | "
+                "Clear Search: c | Refresh: r | Quit: q"
             ),
             id="commands",
         )
 
     async def on_mount(self) -> None:
         self.configured_sources = load_sources(self.config_path)
+        self.projects = load_projects(self.config_path, sources=self.configured_sources)
         self.ui_config = load_ui_config(self.config_path)
         self.icons = icon_set(self.ui_config.icon_style)
         await self.reload_from_db()
@@ -292,10 +348,27 @@ class LazylensApp(App[None]):
     async def reload_from_db(self) -> None:
         with Index(self.db_path) as index:
             self.sources = index.sources()
-        if self.sources and self.selected_source_key not in {source.key for source in self.sources}:
-            self.selected_source_key = self.sources[0].key
-        if not self.sources:
+        self.source_types = {source.key: source.type for source in self.sources}
+        indexed_source_keys = {source.key for source in self.sources}
+        self.projects = [
+            project
+            for project in self.projects
+            if any(source_key in indexed_source_keys for source_key in project.source_keys)
+        ]
+        if self.projects and self.selected_project_key not in {project.key for project in self.projects}:
+            self.selected_project_key = self.projects[0].key
+        if not self.projects:
+            self.selected_project_key = None
+        self.project_sources = [
+            source
+            for source in self.sources
+            if source.key in set(self.selected_project_source_keys())
+        ]
+        if self.project_sources and self.selected_source_key not in {source.key for source in self.project_sources}:
+            self.selected_source_key = self.project_sources[0].key
+        if not self.project_sources:
             self.selected_source_key = None
+        self.update_projects_row()
         self.update_sources_row()
         await self.refresh_categories()
 
@@ -304,7 +377,7 @@ class LazylensApp(App[None]):
             categories = index.categories(source_key=self.selected_source_key)
         category_list = self.query_one("#categories", ListView)
         await category_list.clear()
-        if not self.sources:
+        if not self.project_sources:
             await category_list.append(MessageItem("No indexed sources"))
             category_list.index = None
             self.selected_category_key = None
@@ -320,16 +393,19 @@ class LazylensApp(App[None]):
 
     async def refresh_results(self, *, highlight_item_id: int | None = None) -> None:
         with Index(self.db_path) as index:
+            source_keys = self.selected_project_source_keys()
+            active_source_key = self.selected_source_key if self.selected_category_key else None
             self.results = index.search(
                 self.query_text,
                 limit=200,
-                source_key=self.selected_source_key,
+                source_key=active_source_key,
+                source_keys=source_keys if active_source_key is None else None,
                 category=self.selected_category_key,
             )
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
         if self.results:
-            await result_list.extend([ResultItem(result, self.icons) for result in self.results])
+            await result_list.extend([ResultItem(result, self.icons, self.source_type(result)) for result in self.results])
             result_list.index = self.result_index(highlight_item_id)
             await self.update_current_result(self.results[result_list.index or 0])
             return
@@ -337,19 +413,34 @@ class LazylensApp(App[None]):
         result_list.index = None
         await self.update_current_result(None)
 
+    def update_projects_row(self) -> None:
+        projects = self.query_one("#projects", Static)
+        if not self.projects:
+            label = "no projects configured" if not self.configured_sources else "no indexed projects"
+            projects.update(Text(f"Projects: {label}"))
+            return
+        parts = []
+        source_counts = {source.key: source.count for source in self.sources}
+        for index, project in enumerate(self.projects[:9], start=1):
+            marker = "*" if project.key == self.selected_project_key else " "
+            count = sum(source_counts.get(source_key, 0) for source_key in project.source_keys)
+            label = f"{self.icons.project} {project.name}".strip()
+            parts.append(f"[{index}]{marker} {label} ({count})")
+        projects.update(Text("Projects: " + " | ".join(parts)))
+
     def update_sources_row(self) -> None:
         sources = self.query_one("#sources", Static)
-        if not self.sources:
+        if not self.project_sources:
             label = "no sources configured" if not self.configured_sources else "no indexed sources"
             sources.update(Text(f"Sources: {label}"))
             return
         parts = []
-        for index, source in enumerate(self.sources[:9], start=1):
+        for shortcut, source in zip(SOURCE_SHORTCUTS, self.project_sources[:len(SOURCE_SHORTCUTS)]):
             marker = "*" if source.key == self.selected_source_key else " "
             icon = self.icons.source_for(source.type)
             label = f"{icon} {source.name}".strip()
-            parts.append(f"[{index}]{marker} {label} ({source.count})")
-        sources.update(Text("Sources: " + " | ".join(parts)))
+            parts.append(f"[{shortcut}]{marker} {label} ({source.count})")
+        sources.update(Text("Structure Sources: " + " | ".join(parts)))
 
     async def update_current_result(self, result: SearchResult | None) -> None:
         self.update_preview(result)
@@ -412,8 +503,9 @@ class LazylensApp(App[None]):
             return
 
         with Index(self.db_path) as index:
-            incoming = index.incoming_links(result.id)
-            outgoing = index.outgoing_links(result.id)
+            source_keys = self.selected_project_source_keys()
+            incoming = index.incoming_links(result.id, source_keys=source_keys)
+            outgoing = index.outgoing_links(result.id, source_keys=source_keys)
         if incoming:
             await incoming_list.extend([RelationItem(item, self.icons) for item in incoming])
             incoming_list.index = 0
@@ -474,11 +566,30 @@ class LazylensApp(App[None]):
             return
         self.notify(f"Could not open {result.url}", severity="error")
 
-    async def action_select_source(self, number: int) -> None:
+    async def action_select_project(self, number: int) -> None:
         index = number - 1
-        if index < 0 or index >= len(self.sources):
+        if index < 0 or index >= len(self.projects):
             return
-        self.selected_source_key = self.sources[index].key
+        self.selected_project_key = self.projects[index].key
+        project_source_keys = set(self.selected_project_source_keys())
+        self.project_sources = [source for source in self.sources if source.key in project_source_keys]
+        self.selected_source_key = self.project_sources[0].key if self.project_sources else None
+        self.selected_category_key = None
+        self.pending_category_key = None
+        self.history.clear()
+        self.result_stack.clear()
+        self.update_projects_row()
+        self.update_sources_row()
+        await self.refresh_categories()
+
+    async def action_select_source_shortcut(self, shortcut: str) -> None:
+        try:
+            index = SOURCE_SHORTCUTS.index(shortcut)
+        except ValueError:
+            return
+        if index < 0 or index >= len(self.project_sources):
+            return
+        self.selected_source_key = self.project_sources[index].key
         self.selected_category_key = None
         self.pending_category_key = None
         self.history.clear()
@@ -581,7 +692,7 @@ class LazylensApp(App[None]):
         self.results = results
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
-        await result_list.extend([ResultItem(result, self.icons) for result in results])
+        await result_list.extend([ResultItem(result, self.icons, self.source_type(result)) for result in results])
         result_list.index = self.result_index(highlight_item_id)
         await self.update_current_result(results[result_list.index or 0])
         result_list.focus()
@@ -619,7 +730,7 @@ class LazylensApp(App[None]):
     def empty_results_message(self) -> str:
         if not self.configured_sources:
             return "No sources configured"
-        if not self.sources:
+        if not self.project_sources:
             return "No indexed sources"
         if self.query_text:
             return "No search results"
@@ -636,7 +747,7 @@ class LazylensApp(App[None]):
                     "Run `lazylens demo` for sample data, or `lazylens init --root <folder>`.",
                 ]
             )
-        if not self.sources:
+        if not self.project_sources:
             return "\n".join(
                 [
                     "Sources are configured, but nothing has been indexed yet.",
@@ -647,6 +758,15 @@ class LazylensApp(App[None]):
         if self.query_text:
             return f"No results for: {self.query_text}"
         return "No result selected."
+
+    def selected_project_source_keys(self) -> tuple[str, ...]:
+        for project in self.projects:
+            if project.key == self.selected_project_key:
+                return project.source_keys
+        return tuple(source.key for source in self.sources)
+
+    def source_type(self, result: SearchResult) -> str:
+        return self.source_types.get(result.source_key, "local")
 
 
 def run_tui(config_path: str | Path | None = None, db_path: str | Path | None = None) -> int:

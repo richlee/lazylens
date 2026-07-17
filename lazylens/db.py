@@ -235,6 +235,7 @@ class Index:
         *,
         limit: int = 20,
         source_key: str | None = None,
+        source_keys: Iterable[str] | None = None,
         category: str | None = None,
     ) -> list[SearchResult]:
         filters = []
@@ -242,6 +243,11 @@ class Index:
         if source_key:
             filters.append("items.source_key = ?")
             params.append(source_key)
+        project_source_keys = sorted(set(source_keys or []))
+        if project_source_keys:
+            placeholders = ", ".join("?" for _source_key in project_source_keys)
+            filters.append(f"items.source_key IN ({placeholders})")
+            params.extend(project_source_keys)
         if category:
             filters.append("items.category = ?")
             params.append(category)
@@ -402,10 +408,25 @@ class Index:
         ).fetchall()
         return [search_result_from_row(row) for row in rows]
 
-    def related_items(self, item_id: int, *, limit: int = 12) -> list[RelatedItem]:
-        return [*self.outgoing_links(item_id, limit=limit), *self.incoming_links(item_id, limit=limit)][:limit]
+    def related_items(
+        self,
+        item_id: int,
+        *,
+        limit: int = 12,
+        source_keys: Iterable[str] | None = None,
+    ) -> list[RelatedItem]:
+        return [
+            *self.outgoing_links(item_id, limit=limit, source_keys=source_keys),
+            *self.incoming_links(item_id, limit=limit, source_keys=source_keys),
+        ][:limit]
 
-    def outgoing_links(self, item_id: int, *, limit: int = 50) -> list[RelatedItem]:
+    def outgoing_links(
+        self,
+        item_id: int,
+        *,
+        limit: int = 50,
+        source_keys: Iterable[str] | None = None,
+    ) -> list[RelatedItem]:
         item = self.connection.execute(
             "SELECT source_key, item_key FROM items WHERE id = ?",
             (item_id,),
@@ -423,13 +444,19 @@ class Index:
             """,
             (str(item["source_key"]), str(item["item_key"]), limit),
         ).fetchall()
-        target_lookup = self.item_lookup()
+        target_lookup = self.item_lookup_for_sources(source_keys)
         return [
             related_item_from_target_url(str(row["target_url"]), "Links to", target_lookup)
             for row in link_rows
         ]
 
-    def incoming_links(self, item_id: int, *, limit: int = 50) -> list[RelatedItem]:
+    def incoming_links(
+        self,
+        item_id: int,
+        *,
+        limit: int = 50,
+        source_keys: Iterable[str] | None = None,
+    ) -> list[RelatedItem]:
         item = self.connection.execute(
             "SELECT source_key, url FROM items WHERE id = ?",
             (item_id,),
@@ -437,14 +464,23 @@ class Index:
         if item is None:
             return []
         target_key = relationship_url_key(str(item["url"]))
+        project_source_keys = sorted(set(source_keys or []))
+        source_filter = ""
+        params: list[object] = []
+        if project_source_keys:
+            placeholders = ", ".join("?" for _source_key in project_source_keys)
+            source_filter = f"WHERE source_key IN ({placeholders})"
+            params.extend(project_source_keys)
         link_rows = self.connection.execute(
-            """
+            f"""
             SELECT source_key, from_item_key, target_url
             FROM item_links
+            {source_filter}
             ORDER BY target_url COLLATE NOCASE
             """,
+            params,
         ).fetchall()
-        source_lookup = self.item_lookup()
+        source_lookup = self.item_lookup_for_sources(source_keys)
         related = []
         for row in link_rows:
             if relationship_url_key(str(row["target_url"])) != target_key:
@@ -462,7 +498,18 @@ class Index:
             )
         return sorted(related, key=lambda item: item.title.lower())[:limit]
 
-    def item_lookup(self, source_key: str | None = None) -> ItemLookup:
+    def item_lookup_for_sources(self, source_keys: Iterable[str] | None = None) -> ItemLookup:
+        project_source_keys = sorted(set(source_keys or []))
+        if project_source_keys:
+            return self.item_lookup(source_keys=project_source_keys)
+        return self.item_lookup()
+
+    def item_lookup(
+        self,
+        source_key: str | None = None,
+        *,
+        source_keys: Iterable[str] | None = None,
+    ) -> ItemLookup:
         if source_key:
             rows = self.connection.execute(
                 """
@@ -471,6 +518,17 @@ class Index:
                 WHERE source_key = ?
                 """,
                 (source_key,),
+            ).fetchall()
+        elif source_keys:
+            project_source_keys = sorted(set(source_keys))
+            placeholders = ", ".join("?" for _source_key in project_source_keys)
+            rows = self.connection.execute(
+                f"""
+                SELECT items.*, 0.0 AS rank
+                FROM items
+                WHERE source_key IN ({placeholders})
+                """,
+                project_source_keys,
             ).fetchall()
         else:
             rows = self.connection.execute(

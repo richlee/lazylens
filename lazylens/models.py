@@ -16,6 +16,13 @@ class SourceConfig:
 
 
 @dataclass(frozen=True)
+class ProjectConfig:
+    key: str
+    name: str
+    source_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class UiConfig:
     icon_style: str = "ascii"
 

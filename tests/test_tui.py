@@ -168,3 +168,63 @@ def test_tui_enter_in_search_applies_query_without_opening(tmp_path: Path, monke
     asyncio.run(run_app())
 
     assert opened == []
+
+
+def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    target = IndexedItem(
+        source_key="local",
+        item_key="hld.md",
+        title="HLD",
+        url="file:///hld.md",
+        path="/tmp/hld.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T12:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="High level design.",
+    )
+    product = IndexedItem(
+        source_key="local",
+        item_key="product.md",
+        title="Product Overview",
+        url="file:///product.md",
+        path="/tmp/product.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Product",
+        container="product",
+        snippet="Product context.",
+        links=("file:///hld.md",),
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([target, product])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            outgoing = app.query_one("#outgoing", ListView)
+            incoming = app.query_one("#incoming", ListView)
+            results = app.query_one("#results", ListView)
+
+            assert app.results[0].title == "Product Overview"
+            assert outgoing.highlighted_child is not None
+            outgoing.focus()
+            await pilot.press("right")
+            await pilot.pause()
+
+            assert app.focused is results
+            assert app.results[0].title == "HLD"
+            assert incoming.highlighted_child is not None
+
+            await pilot.press("left")
+            await pilot.pause()
+            assert app.results[0].title == "Product Overview"
+
+    asyncio.run(run_app())

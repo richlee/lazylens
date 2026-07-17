@@ -17,7 +17,7 @@ from textual.widgets import Header, Input, Label, ListItem, ListView, Static
 from lazylens.config import configured_db_path, load_sources
 from lazylens.db import Index
 from lazylens.indexers.adapters import IndexingError, iter_source_items
-from lazylens.models import CategorySummary, SearchResult, SourceConfig, SourceSummary
+from lazylens.models import CategorySummary, RelatedItem, SearchResult, SourceConfig, SourceSummary
 from lazylens.paths import default_config_path
 
 
@@ -40,6 +40,13 @@ class MessageItem(ListItem):
         super().__init__(Label(message, markup=False), disabled=True)
 
 
+class RelationItem(ListItem):
+    def __init__(self, item: RelatedItem) -> None:
+        self.related_item = item
+        label = item.title if item.item_id is not None else f"{item.title} (external)"
+        super().__init__(Label(label, markup=False), disabled=item.item_id is None)
+
+
 class LazylensApp(App[None]):
     TITLE = "lazylens"
     BINDINGS = [
@@ -47,6 +54,10 @@ class LazylensApp(App[None]):
         Binding("c", "clear_search", "Clear Search", show=False),
         Binding("r", "refresh_index", "Refresh", show=False),
         Binding("enter", "open_selected", "Open", show=False, priority=True),
+        Binding("right", "follow_relation", "Follow", show=False),
+        Binding("space", "follow_relation", "Follow", show=False),
+        Binding("left", "back", "Back", show=False),
+        Binding("backspace", "back", "Back", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("1", "select_source(1)", "Source 1", show=False),
         Binding("2", "select_source(2)", "Source 2", show=False),
@@ -79,15 +90,36 @@ class LazylensApp(App[None]):
         height: 1fr;
     }
 
-    #categories {
+    #spaces {
         width: 32;
         margin: 0 0 0 1;
+    }
+
+    #categories {
+        height: 1fr;
         border: solid #7a808b;
     }
 
-    #right {
+    #center {
         width: 1fr;
+        margin: 0 0 0 1;
+    }
+
+    #relations {
+        width: 42;
         margin: 0 1 0 1;
+    }
+
+    .relation-title {
+        height: 1;
+        padding: 0 1;
+        color: #d8a24c;
+    }
+
+    .column-title {
+        height: 1;
+        padding: 0 1;
+        color: #d8a24c;
     }
 
     #results {
@@ -100,6 +132,16 @@ class LazylensApp(App[None]):
         border: solid #7a808b;
         padding: 0 1 1 1;
         color: #d7d4ca;
+    }
+
+    #incoming {
+        height: 1fr;
+        border: solid #7a808b;
+    }
+
+    #outgoing {
+        height: 1fr;
+        border: solid #7a808b;
     }
 
     #commands {
@@ -125,17 +167,32 @@ class LazylensApp(App[None]):
         self.selected_source_key: str | None = None
         self.selected_category_key: str | None = None
         self.query_text = ""
+        self.history: list[SearchResult] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static(Text("Sources: none indexed"), id="sources")
         yield Input(placeholder="Search", id="search")
         with Horizontal(id="body"):
-            yield ListView(id="categories")
-            with Vertical(id="right"):
+            with Vertical(id="spaces"):
+                yield Static(Text("Spaces"), id="spaces-title", classes="column-title")
+                yield ListView(id="categories")
+            with Vertical(id="center"):
+                yield Static(Text("Pages"), id="pages-title", classes="column-title")
                 yield ListView(id="results")
                 yield Static(Text("No result selected"), id="preview")
-        yield Static(Text("Open: Enter | Search: / | Clear Search: c | Refresh: r | Quit: q"), id="commands")
+            with Vertical(id="relations"):
+                yield Static(Text("Incoming"), id="incoming-title", classes="relation-title")
+                yield ListView(id="incoming")
+                yield Static(Text("Outgoing"), id="outgoing-title", classes="relation-title")
+                yield ListView(id="outgoing")
+        yield Static(
+            Text(
+                "Open: Enter | Follow: Right/Space | Back: Left/Backspace | "
+                "Search: / | Clear Search: c | Refresh: r | Quit: q"
+            ),
+            id="commands",
+        )
 
     async def on_mount(self) -> None:
         self.configured_sources = load_sources(self.config_path)
@@ -181,11 +238,11 @@ class LazylensApp(App[None]):
         if self.results:
             await result_list.extend([ResultItem(result) for result in self.results])
             result_list.index = 0
-            self.update_preview(self.results[0])
+            await self.update_current_result(self.results[0])
             return
         await result_list.append(MessageItem(self.empty_results_message()))
         result_list.index = None
-        self.update_preview(None)
+        await self.update_current_result(None)
 
     def update_sources_row(self) -> None:
         sources = self.query_one("#sources", Static)
@@ -198,6 +255,10 @@ class LazylensApp(App[None]):
             marker = "*" if source.key == self.selected_source_key else " "
             parts.append(f"[{index}]{marker} {source.name} ({source.count})")
         sources.update(Text("Sources: " + " | ".join(parts)))
+
+    async def update_current_result(self, result: SearchResult | None) -> None:
+        self.update_preview(result)
+        await self.update_relations(result)
 
     def update_preview(self, result: SearchResult | None) -> None:
         preview = self.query_one("#preview", Static)
@@ -213,16 +274,18 @@ class LazylensApp(App[None]):
 
     async def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.list_view.id == "categories" and isinstance(event.item, CategoryItem):
+            self.history.clear()
             self.selected_category_key = event.item.category_key
             await self.refresh_results()
         elif event.list_view.id == "results" and isinstance(event.item, ResultItem):
-            self.update_preview(event.item.result)
+            await self.update_current_result(event.item.result)
 
     def action_focus_search(self) -> None:
         self.query_one("#search", Input).focus()
 
     async def apply_search(self, value: str) -> None:
         self.query_text = value.strip()
+        self.history.clear()
         await self.refresh_results()
         self.query_one("#results", ListView).focus()
 
@@ -232,6 +295,34 @@ class LazylensApp(App[None]):
         search.value = ""
         await self.refresh_results()
         self.query_one("#results", ListView).focus()
+
+    async def update_relations(self, result: SearchResult | None) -> None:
+        incoming_list = self.query_one("#incoming", ListView)
+        outgoing_list = self.query_one("#outgoing", ListView)
+        await incoming_list.clear()
+        await outgoing_list.clear()
+        if result is None:
+            await incoming_list.append(MessageItem("No document selected"))
+            await outgoing_list.append(MessageItem("No document selected"))
+            incoming_list.index = None
+            outgoing_list.index = None
+            return
+
+        with Index(self.db_path) as index:
+            incoming = index.incoming_links(result.id)
+            outgoing = index.outgoing_links(result.id)
+        if incoming:
+            await incoming_list.extend([RelationItem(item) for item in incoming])
+            incoming_list.index = 0
+        else:
+            await incoming_list.append(MessageItem("No incoming links"))
+            incoming_list.index = None
+        if outgoing:
+            await outgoing_list.extend([RelationItem(item) for item in outgoing])
+            outgoing_list.index = 0
+        else:
+            await outgoing_list.append(MessageItem("No outgoing links"))
+            outgoing_list.index = None
 
     async def action_refresh_index(self) -> None:
         indexed = 0
@@ -252,6 +343,9 @@ class LazylensApp(App[None]):
         if isinstance(focused, Input) and focused.id == "search":
             await self.apply_search(focused.value)
             return
+        if isinstance(focused, ListView) and focused.id in {"incoming", "outgoing"}:
+            await self.follow_selected_relation()
+            return
         if focused is not self.query_one("#results", ListView):
             return
         result = self.selected_result()
@@ -269,8 +363,48 @@ class LazylensApp(App[None]):
             return
         self.selected_source_key = self.sources[index].key
         self.selected_category_key = None
+        self.history.clear()
         self.update_sources_row()
         await self.refresh_categories()
+
+    async def action_follow_relation(self) -> None:
+        await self.follow_selected_relation()
+
+    async def action_back(self) -> None:
+        if isinstance(self.focused, Input):
+            return
+        if not self.history:
+            return
+        await self.show_context_result(self.history.pop(), push_history=False)
+
+    async def follow_selected_relation(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, ListView) or focused.id not in {"incoming", "outgoing"}:
+            return
+        item = focused.highlighted_child
+        if not isinstance(item, RelationItem) or item.related_item.item_id is None:
+            return
+        previous = self.selected_result()
+        with Index(self.db_path) as index:
+            result = index.item_by_id(item.related_item.item_id)
+        if result is None:
+            return
+        if previous is not None:
+            self.history.append(previous)
+        await self.show_context_result(result, push_history=False)
+
+    async def show_context_result(self, result: SearchResult, *, push_history: bool = True) -> None:
+        if push_history:
+            previous = self.selected_result()
+            if previous is not None:
+                self.history.append(previous)
+        self.results = [result]
+        result_list = self.query_one("#results", ListView)
+        await result_list.clear()
+        await result_list.append(ResultItem(result))
+        result_list.index = 0
+        await self.update_current_result(result)
+        result_list.focus()
 
     def selected_result(self) -> SearchResult | None:
         result_list = self.query_one("#results", ListView)

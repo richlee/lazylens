@@ -64,6 +64,7 @@ class SearchResult:
 
 @dataclass(frozen=True)
 class RelatedItem:
+    item_id: int | None
     direction: str
     title: str
     url: str

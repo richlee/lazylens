@@ -197,22 +197,20 @@ class Index:
                 (fts_query, *params, limit),
             ).fetchall()
         return [
-            SearchResult(
-                id=int(row["id"]),
-                source_key=str(row["source_key"]),
-                title=str(row["title"]),
-                url=str(row["url"]),
-                path=str(row["path"]),
-                content_type=str(row["content_type"]),
-                modified_at=str(row["modified_at"]),
-                owner=str(row["owner"]),
-                category=str(row["category"]),
-                container=str(row["container"]),
-                snippet=str(row["snippet"]),
-                rank=float(row["rank"]),
-            )
+            search_result_from_row(row)
             for row in rows
         ]
+
+    def item_by_id(self, item_id: int) -> SearchResult | None:
+        row = self.connection.execute(
+            """
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            WHERE id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        return search_result_from_row(row) if row else None
 
     def item_count(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) AS count FROM items").fetchone()
@@ -278,6 +276,7 @@ class Index:
         rows = self.connection.execute(
             """
             SELECT 'Links to' AS direction,
+                   target.id AS item_id,
                    COALESCE(target.title, item_links.target_url) AS title,
                    item_links.target_url AS url,
                    0 AS sort_order
@@ -291,6 +290,7 @@ class Index:
             UNION ALL
 
             SELECT 'Linked from' AS direction,
+                   source.id AS item_id,
                    source.title AS title,
                    source.url AS url,
                    1 AS sort_order
@@ -313,7 +313,78 @@ class Index:
             ),
         ).fetchall()
         return [
-            RelatedItem(direction=str(row["direction"]), title=str(row["title"]), url=str(row["url"]))
+            RelatedItem(
+                item_id=int(row["item_id"]) if row["item_id"] is not None else None,
+                direction=str(row["direction"]),
+                title=str(row["title"]),
+                url=str(row["url"]),
+            )
+            for row in rows
+        ]
+
+    def outgoing_links(self, item_id: int, *, limit: int = 50) -> list[RelatedItem]:
+        item = self.connection.execute(
+            "SELECT source_key, item_key FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        if item is None:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT target.id AS item_id,
+                   COALESCE(target.title, item_links.target_url) AS title,
+                   item_links.target_url AS url
+            FROM item_links
+            LEFT JOIN items AS target
+              ON target.source_key = item_links.source_key
+             AND target.url = item_links.target_url
+            WHERE item_links.source_key = ?
+              AND item_links.from_item_key = ?
+            ORDER BY title COLLATE NOCASE
+            LIMIT ?
+            """,
+            (str(item["source_key"]), str(item["item_key"]), limit),
+        ).fetchall()
+        return [
+            RelatedItem(
+                item_id=int(row["item_id"]) if row["item_id"] is not None else None,
+                direction="Links to",
+                title=str(row["title"]),
+                url=str(row["url"]),
+            )
+            for row in rows
+        ]
+
+    def incoming_links(self, item_id: int, *, limit: int = 50) -> list[RelatedItem]:
+        item = self.connection.execute(
+            "SELECT source_key, url FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        if item is None:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT source.id AS item_id,
+                   source.title AS title,
+                   source.url AS url
+            FROM item_links
+            JOIN items AS source
+              ON source.source_key = item_links.source_key
+             AND source.item_key = item_links.from_item_key
+            WHERE item_links.source_key = ?
+              AND item_links.target_url = ?
+            ORDER BY source.title COLLATE NOCASE
+            LIMIT ?
+            """,
+            (str(item["source_key"]), str(item["url"]), limit),
+        ).fetchall()
+        return [
+            RelatedItem(
+                item_id=int(row["item_id"]),
+                direction="Linked from",
+                title=str(row["title"]),
+                url=str(row["url"]),
+            )
             for row in rows
         ]
 
@@ -362,3 +433,20 @@ class Index:
             """
         )
         self.connection.commit()
+
+
+def search_result_from_row(row: sqlite3.Row) -> SearchResult:
+    return SearchResult(
+        id=int(row["id"]),
+        source_key=str(row["source_key"]),
+        title=str(row["title"]),
+        url=str(row["url"]),
+        path=str(row["path"]),
+        content_type=str(row["content_type"]),
+        modified_at=str(row["modified_at"]),
+        owner=str(row["owner"]),
+        category=str(row["category"]),
+        container=str(row["container"]),
+        snippet=str(row["snippet"]),
+        rank=float(row["rank"]),
+    )

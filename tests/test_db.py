@@ -46,7 +46,11 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         multi_prefix_results = index.search("Share Conf")
         punctuation_results = index.search("SharePoint?")
         related = index.related_items(results[0].id)
-        inbound = index.related_items(index.search("HLD")[0].id)
+        hld = index.search("HLD")[0]
+        inbound = index.related_items(hld.id)
+        outgoing = index.outgoing_links(results[0].id)
+        incoming = index.incoming_links(hld.id)
+        fetched = index.item_by_id(hld.id)
 
     assert len(results) == 1
     assert results[0].title == "Architecture Notes"
@@ -57,9 +61,14 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert multi_prefix_results[0].title == "Architecture Notes"
     assert punctuation_results[0].title == "Architecture Notes"
     assert related[0].direction == "Links to"
+    assert related[0].item_id == hld.id
     assert related[0].title == "HLD"
     assert inbound[0].direction == "Linked from"
     assert inbound[0].title == "Architecture Notes"
+    assert outgoing[0].title == "HLD"
+    assert incoming[0].title == "Architecture Notes"
+    assert fetched is not None
+    assert fetched.title == "HLD"
 
     with Index(db_path) as index:
         sources = index.sources()

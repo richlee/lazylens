@@ -656,7 +656,7 @@ def test_tui_project_scopes_results_and_source_scopes_structure(tmp_path: Path) 
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         f"""
-database = "{db_path}"
+database = "{db_path.as_posix()}"
 
 [sources."dsp-beta"]
 name = "DSP Beta Confluence"

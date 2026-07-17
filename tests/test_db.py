@@ -28,12 +28,18 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
         index.upsert_source(source)
         assert index.upsert_items([item]) == 1
         results = index.search("SharePoint")
+        prefix_results = index.search("Arch")
+        multi_prefix_results = index.search("Share Conf")
+        punctuation_results = index.search("SharePoint?")
 
     assert len(results) == 1
     assert results[0].title == "Architecture Notes"
     assert results[0].source_key == "local"
     assert results[0].category == "Architecture"
     assert results[0].container == "architecture"
+    assert prefix_results[0].title == "Architecture Notes"
+    assert multi_prefix_results[0].title == "Architecture Notes"
+    assert punctuation_results[0].title == "Architecture Notes"
 
     with Index(db_path) as index:
         sources = index.sources()

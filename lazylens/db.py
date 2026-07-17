@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -44,6 +45,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS item_fts USING fts5(
     item_id UNINDEXED
 );
 """
+
+
+def prefix_fts_query(query: str) -> str:
+    terms = re.findall(r"\w+", query)
+    return " ".join(f"{term}*" for term in terms)
 
 
 class Index:
@@ -143,6 +149,7 @@ class Index:
             params.append(category)
         where = f"WHERE {' AND '.join(filters)}" if filters else ""
 
+        fts_query = prefix_fts_query(query)
         if not query.strip():
             rows = self.connection.execute(
                 f"""
@@ -154,6 +161,8 @@ class Index:
                 """,
                 (*params, limit),
             ).fetchall()
+        elif not fts_query:
+            rows = []
         else:
             search_filters = ["item_fts MATCH ?", *filters]
             rows = self.connection.execute(
@@ -165,7 +174,7 @@ class Index:
                 ORDER BY rank
                 LIMIT ?
                 """,
-                (query, *params, limit),
+                (fts_query, *params, limit),
             ).fetchall()
         return [
             SearchResult(

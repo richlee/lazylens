@@ -170,6 +170,62 @@ def test_tui_enter_in_search_applies_query_without_opening(tmp_path: Path, monke
     assert opened == []
 
 
+def test_tui_structure_selection_filters_only_on_enter(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    architecture = IndexedItem(
+        source_key="local",
+        item_key="architecture.md",
+        title="Architecture Notes",
+        url="file:///architecture.md",
+        path="/tmp/architecture.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T12:00:00+00:00",
+        owner="",
+        category="Architecture",
+        container="architecture",
+        snippet="Useful architecture context.",
+    )
+    delivery = IndexedItem(
+        source_key="local",
+        item_key="delivery.md",
+        title="Delivery Plan",
+        url="file:///delivery.md",
+        path="/tmp/delivery.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Delivery",
+        container="delivery",
+        snippet="Delivery milestones.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([architecture, delivery])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            categories = app.query_one("#categories", ListView)
+            results = app.query_one("#results", ListView)
+
+            assert [result.title for result in app.results] == ["Delivery Plan", "Architecture Notes"]
+            categories.focus()
+            categories.index = 1
+            await pilot.pause()
+            assert app.pending_category_key == "Architecture"
+            assert [result.title for result in app.results] == ["Delivery Plan", "Architecture Notes"]
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused is results
+            assert [result.title for result in app.results] == ["Architecture Notes"]
+
+    asyncio.run(run_app())
+
+
 def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)

@@ -166,6 +166,7 @@ class LazylensApp(App[None]):
         self.results: list[SearchResult] = []
         self.selected_source_key: str | None = None
         self.selected_category_key: str | None = None
+        self.pending_category_key: str | None = None
         self.query_text = ""
         self.history: list[SearchResult] = []
 
@@ -175,7 +176,7 @@ class LazylensApp(App[None]):
         yield Input(placeholder="Search", id="search")
         with Horizontal(id="body"):
             with Vertical(id="spaces"):
-                yield Static(Text("Spaces"), id="spaces-title", classes="column-title")
+                yield Static(Text("Structure"), id="spaces-title", classes="column-title")
                 yield ListView(id="categories")
             with Vertical(id="center"):
                 yield Static(Text("Pages"), id="pages-title", classes="column-title")
@@ -188,7 +189,7 @@ class LazylensApp(App[None]):
                 yield ListView(id="outgoing")
         yield Static(
             Text(
-                "Open: Enter | Follow: Right/Space | Back: Left/Backspace | "
+                "Filter Structure: Enter | Open: Enter | Follow: Right/Space | Back: Left/Backspace | "
                 "Search: / | Clear Search: c | Refresh: r | Quit: q"
             ),
             id="commands",
@@ -223,6 +224,7 @@ class LazylensApp(App[None]):
         await category_list.extend([CategoryItem(None), *[CategoryItem(category) for category in categories]])
         category_list.index = 0
         self.selected_category_key = None
+        self.pending_category_key = None
         await self.refresh_results()
 
     async def refresh_results(self, *, highlight_item_id: int | None = None) -> None:
@@ -259,6 +261,8 @@ class LazylensApp(App[None]):
     async def update_current_result(self, result: SearchResult | None) -> None:
         self.update_preview(result)
         await self.update_relations(result)
+        if result is not None:
+            self.highlight_structure(result.category)
 
     def update_preview(self, result: SearchResult | None) -> None:
         preview = self.query_one("#preview", Static)
@@ -274,9 +278,7 @@ class LazylensApp(App[None]):
 
     async def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.list_view.id == "categories" and isinstance(event.item, CategoryItem):
-            self.history.clear()
-            self.selected_category_key = event.item.category_key
-            await self.refresh_results()
+            self.pending_category_key = event.item.category_key
         elif event.list_view.id == "results" and isinstance(event.item, ResultItem):
             await self.update_current_result(event.item.result)
 
@@ -343,6 +345,9 @@ class LazylensApp(App[None]):
         if isinstance(focused, Input) and focused.id == "search":
             await self.apply_search(focused.value)
             return
+        if focused is self.query_one("#categories", ListView):
+            await self.apply_structure_filter()
+            return
         if isinstance(focused, ListView) and focused.id in {"incoming", "outgoing"}:
             await self.follow_selected_relation()
             return
@@ -363,9 +368,16 @@ class LazylensApp(App[None]):
             return
         self.selected_source_key = self.sources[index].key
         self.selected_category_key = None
+        self.pending_category_key = None
         self.history.clear()
         self.update_sources_row()
         await self.refresh_categories()
+
+    async def apply_structure_filter(self) -> None:
+        self.history.clear()
+        self.selected_category_key = self.pending_category_key
+        await self.refresh_results()
+        self.query_one("#results", ListView).focus()
 
     async def action_follow_relation(self) -> None:
         await self.follow_selected_relation()
@@ -422,6 +434,14 @@ class LazylensApp(App[None]):
             if result.id == item_id:
                 return index
         return 0
+
+    def highlight_structure(self, category_key: str) -> None:
+        category_list = self.query_one("#categories", ListView)
+        for index, child in enumerate(category_list.children):
+            if isinstance(child, CategoryItem) and child.category_key == category_key:
+                category_list.index = index
+                self.pending_category_key = category_key
+                return
 
     def empty_results_message(self) -> str:
         if not self.configured_sources:

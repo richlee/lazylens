@@ -53,8 +53,9 @@ TUI:
 - Preview panel shows title, source, modified date, owner, path/URL, and context snippet.
 - Related-docs view:
   - First version can be a third vertical panel listing linked/related documents for the highlighted item.
+  - Split related documents into inbound links and outbound links when there is enough screen width.
   - The panel should be keyboard navigable; `Enter` opens the related document URL.
-  - It may later become a horizontally expanding series of panes, similar to column-based directory navigation, where moving through one list reveals the next level of related documents.
+  - It may later become a horizontally expanding series of relationship panes, similar to column-based directory navigation, where moving through one list reveals the next level of related documents.
 - Search result rows should be backed by title, preview text, and metadata, even where the first TUI only renders the title.
 - `Enter`: open the canonical source URL in the browser.
 - `/`: search.
@@ -113,6 +114,19 @@ Related navigation should support both:
 
 - A TUI related-docs panel for fast keyboard-driven use.
 - A generated local browser graph for visual exploration.
+
+Relationship column view:
+
+- Start from the current search/category results.
+- Selecting a document opens a relationship column to the right.
+- Each relationship column is split vertically:
+  - Top: documents that link to the selected document.
+  - Bottom: documents the selected document links out to.
+- Selecting a related document opens another relationship column to the right using the same inbound/outbound split.
+- Limit rightward expansion, probably to 3-4 relationship columns.
+- When the limit is reached, shift older columns left or replace the rightmost column rather than letting the layout become unreadable.
+- This should behave like a document-oriented column file manager: fast keyboard movement, clear context, and explicit link direction.
+- This is an advanced evolution of the simpler third-panel related-docs view, not required for the first link-tracking implementation.
 
 Graph view:
 

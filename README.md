@@ -23,8 +23,8 @@ Jira links, Teams files, and richer context previews.
 ## Status
 
 Phase 1 skeleton has started. The first implementation slice supports local
-folder indexing into SQLite/FTS, command-line search, and an early Textual TUI.
-Confluence and SharePoint connectors are planned next.
+folder and Confluence Cloud indexing into SQLite/FTS, command-line search, and
+an early Textual TUI. SharePoint is planned next.
 
 See [docs/plan.md](docs/plan.md).
 
@@ -126,13 +126,23 @@ max_pages = 5
 Then:
 
 ```sh
-export CONFLUENCE_BASE_URL="https://example.atlassian.net"
-export CONFLUENCE_EMAIL="you@example.com"
-export CONFLUENCE_API_TOKEN="..."
+lazylens init confluence \
+  --base-url "https://example.atlassian.net" \
+  --email "you@example.com" \
+  --space-key ARCH
+
+# Edit the generated env file and paste an Atlassian API token.
+${EDITOR:-vi} ~/.config/lazylens/atlassian.env
+
+source ~/.config/lazylens/atlassian.env
 lazylens doctor
-lazylens index work-confluence
+lazylens index personal-confluence
 lazylens
 ```
+
+`lazylens init confluence` creates or appends the Confluence source in
+`config.toml`, then writes a separate `atlassian.env` skeleton for credentials.
+The API token should stay in the env file or your shell, not in `config.toml`.
 
 For Confluence, `space_keys` is usually the friendliest scope to configure. You
 can also configure `space_ids` if you already know them. `page_limit` controls
@@ -142,6 +152,12 @@ early connector phase.
 If needed, `base_url`, `email`, or `api_token_env` can be set on the source, but
 the token value itself should stay out of the TOML file. `CONFLUENCE_BASE_URL`
 may be either the Atlassian site root or the `/wiki` URL.
+
+For personal or non-client testing, create a small Atlassian Cloud site and a
+space dedicated to sample documents, then create an API token from your
+Atlassian account security settings. Put only the site URL, account email, and
+token in `~/.config/lazylens/atlassian.env`, run `source` in the shell that will
+launch lazylens, and use `lazylens doctor` before indexing.
 
 References:
 

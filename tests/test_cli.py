@@ -45,6 +45,48 @@ def test_cli_init_writes_starter_config(tmp_path: Path, capsys) -> None:
     assert f'root = "{root}"' in text
 
 
+def test_cli_init_confluence_writes_config_and_env_skeleton(tmp_path: Path, capsys) -> None:
+    config = tmp_path / "config.toml"
+    env_file = tmp_path / "atlassian.env"
+    db = tmp_path / "index.sqlite3"
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "init",
+                "confluence",
+                "--database",
+                str(db),
+                "--env-file",
+                str(env_file),
+                "--base-url",
+                "https://example.atlassian.net",
+                "--email",
+                "you@example.com",
+                "--space-key",
+                "ARCH",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    config_text = config.read_text()
+    env_text = env_file.read_text()
+    assert "Confluence source: personal-confluence (ARCH)" in output
+    assert f'database = "{db}"' in config_text
+    assert '[sources."personal-confluence"]' in config_text
+    assert 'name = "Personal Confluence"' in config_text
+    assert 'type = "confluence"' in config_text
+    assert 'space_keys = ["ARCH"]' in config_text
+    assert 'export CONFLUENCE_BASE_URL="https://example.atlassian.net"' in env_text
+    assert 'export CONFLUENCE_EMAIL="you@example.com"' in env_text
+    assert 'export CONFLUENCE_API_TOKEN=""' in env_text
+    assert oct(env_file.stat().st_mode & 0o777) == "0o600"
+
+
 def test_cli_demo_creates_searchable_demo_source(tmp_path: Path, capsys) -> None:
     config = tmp_path / "config.toml"
     db = tmp_path / "index.sqlite3"
@@ -101,4 +143,29 @@ space_keys = ["LAZYLENS"]
     output = capsys.readouterr().out
     env_file = config_home / "lazylens" / "atlassian.env"
     assert f"Confluence env: {env_file} (not found)" in output
+    assert "missing: CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN" in output
     assert f"source {env_file}" in output
+
+
+def test_cli_index_reports_missing_confluence_env_vars(tmp_path: Path, capsys, monkeypatch) -> None:
+    config = tmp_path / "config.toml"
+    db = tmp_path / "index.sqlite3"
+    config.write_text(
+        f"""
+database = "{db}"
+
+[sources.personal]
+name = "Personal Confluence"
+type = "confluence"
+space_keys = ["LAZYLENS"]
+"""
+    )
+    monkeypatch.delenv("CONFLUENCE_BASE_URL", raising=False)
+    monkeypatch.delenv("CONFLUENCE_EMAIL", raising=False)
+    monkeypatch.delenv("CONFLUENCE_API_TOKEN", raising=False)
+
+    assert main(["--config", str(config), "index", "personal"]) == 1
+
+    error = capsys.readouterr().err
+    assert "Index failed for Personal Confluence" in error
+    assert "missing base_url or CONFLUENCE_BASE_URL" in error

@@ -393,6 +393,80 @@ class Index:
             for row in rows
         ]
 
+    def jira_structure(self, *, source_key: str) -> list[CategorySummary]:
+        source = self.connection.execute(
+            """
+            SELECT sources.name,
+                   COUNT(items.id) AS count,
+                   GROUP_CONCAT(DISTINCT NULLIF(items.container, '')) AS containers
+            FROM sources
+            LEFT JOIN items ON items.source_key = sources.key
+                           AND items.structure_type = 'page'
+            WHERE sources.key = ?
+            GROUP BY sources.key, sources.name
+            """,
+            (source_key,),
+        ).fetchone()
+        if source is None:
+            return []
+
+        containers = [
+            container
+            for container in str(source["containers"] or "").split(",")
+            if container
+        ]
+        root_name = containers[0] if len(containers) == 1 else str(source["name"])
+        root = CategorySummary(
+            key=f"{source_key}:jira-root",
+            name=root_name,
+            count=int(source["count"]),
+            kind="jira-project",
+        )
+        rows = self.connection.execute(
+            """
+            SELECT epic.id,
+                   epic.item_key,
+                   epic.title,
+                   COUNT(child.id) AS child_count
+            FROM items AS epic
+            LEFT JOIN items AS child
+              ON child.source_key = epic.source_key
+             AND child.parent_key = epic.item_key
+             AND child.structure_type = 'page'
+            WHERE epic.source_key = ?
+              AND epic.structure_type = 'page'
+              AND LOWER(epic.snippet) LIKE 'epic%'
+            GROUP BY epic.id, epic.item_key, epic.title
+            ORDER BY epic.title COLLATE NOCASE
+            """,
+            (source_key,),
+        ).fetchall()
+        epics = [
+            CategorySummary(
+                key=str(row["item_key"]),
+                name=str(row["title"]),
+                count=int(row["child_count"]),
+                kind="epic",
+                item_id=int(row["id"]),
+            )
+            for row in rows
+        ]
+        return [root, *epics]
+
+    def jira_epics(self, *, source_key: str) -> list[SearchResult]:
+        rows = self.connection.execute(
+            """
+            SELECT items.*, 0.0 AS rank
+            FROM items
+            WHERE source_key = ?
+              AND structure_type = 'page'
+              AND LOWER(snippet) LIKE 'epic%'
+            ORDER BY title COLLATE NOCASE
+            """,
+            (source_key,),
+        ).fetchall()
+        return [search_result_from_row(row) for row in rows]
+
     def children(self, *, source_key: str, parent_key: str) -> list[SearchResult]:
         rows = self.connection.execute(
             """

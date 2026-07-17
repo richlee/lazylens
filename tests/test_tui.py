@@ -587,6 +587,73 @@ def test_tui_right_from_pages_focuses_incoming_when_no_outgoing_links(tmp_path: 
     asyncio.run(run_app())
 
 
+def test_tui_jira_structure_shows_epics_and_drills_to_children(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="jira", name="Jira", type="jira")
+    epic = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-1",
+        title="LAZY-1 - Epic",
+        url="https://example.atlassian.net/browse/LAZY-1",
+        path="LAZY/LAZY-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-16T14:00:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Epic | In Progress | Build the document graph.",
+    )
+    story = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-2",
+        title="LAZY-2 - Story",
+        url="https://example.atlassian.net/browse/LAZY-2",
+        path="LAZY/LAZY-2",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Story | To Do | Implement child navigation.",
+        parent_key="LAZY-1",
+    )
+    bug = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-3",
+        title="LAZY-3 - Bug",
+        url="https://example.atlassian.net/browse/LAZY-3",
+        path="LAZY/LAZY-3",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-16T12:00:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Bug | To Do | Unparented bug.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([epic, story, bug])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            categories = app.query_one("#categories", ListView)
+
+            assert [getattr(item, "kind", "") for item in categories.children] == ["jira-project", "epic"]
+            assert [result.title for result in app.results] == ["LAZY-1 - Epic"]
+
+            categories.focus()
+            categories.index = 1
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert [result.title for result in app.results] == ["LAZY-2 - Story"]
+
+    asyncio.run(run_app())
+
+
 def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
@@ -743,9 +810,6 @@ sources = ["dsp-beta", "DSPBeta"]
             await pilot.pause()
 
             assert app.selected_source_key == "DSPBeta"
-            assert {result.title for result in app.results} == {
-                "DSP LLD",
-                "DSPBeta-1 - Build relationship view",
-            }
+            assert app.results == []
 
     asyncio.run(run_app())

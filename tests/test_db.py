@@ -237,6 +237,66 @@ def test_index_resolves_links_across_sources(tmp_path: Path) -> None:
     assert hld_incoming[0].title == "LAZY-1 - Build document graph"
 
 
+def test_index_exposes_jira_project_root_and_epics(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="jira", name="Personal Jira", type="jira")
+    epic = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-1",
+        title="LAZY-1 - Build document graph",
+        url="https://example.atlassian.net/browse/LAZY-1",
+        path="LAZY/LAZY-1",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T10:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Epic | In Progress | Build the relationship view.",
+    )
+    story = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-2",
+        title="LAZY-2 - Add source selector",
+        url="https://example.atlassian.net/browse/LAZY-2",
+        path="LAZY/LAZY-2",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T11:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Story | To Do | Add source selector.",
+        parent_key="LAZY-1",
+    )
+    bug = IndexedItem(
+        source_key="jira",
+        item_key="LAZY-3",
+        title="LAZY-3 - Fix stray notification",
+        url="https://example.atlassian.net/browse/LAZY-3",
+        path="LAZY/LAZY-3",
+        content_type="application/vnd.atlassian.jira.issue",
+        modified_at="2026-07-17T12:30:00+00:00",
+        owner="",
+        category="LazyLens",
+        container="LAZY",
+        snippet="Bug | To Do | Fix notification.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([epic, story, bug])
+        structure = index.jira_structure(source_key="jira")
+        epics = index.jira_epics(source_key="jira")
+        children = index.children(source_key="jira", parent_key="LAZY-1")
+
+    assert [node.kind for node in structure] == ["jira-project", "epic"]
+    assert structure[0].name == "LAZY"
+    assert structure[0].count == 3
+    assert structure[1].name == "LAZY-1 - Build document graph"
+    assert structure[1].count == 1
+    assert [item.title for item in epics] == ["LAZY-1 - Build document graph"]
+    assert [item.title for item in children] == ["LAZY-2 - Add source selector"]
+
+
 def test_index_scopes_search_and_relationships_to_project_sources(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     confluence_source = SourceConfig(key="conf", name="Confluence", type="confluence")

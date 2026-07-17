@@ -46,6 +46,10 @@ class IconSet:
     jira_source: str
 
     def structure(self, kind: str) -> str:
+        if kind == "jira-project":
+            return self.jira_source
+        if kind == "epic":
+            return "[E]" if self is ICON_SETS["ascii"] else "\u2b22"
         if kind == "space":
             return self.space
         if kind == "parent-page":
@@ -122,7 +126,7 @@ def result_icon(result: SearchResult, icons: IconSet, source_type: str) -> str:
 
 def item_type_icon(result: SearchResult, icons: IconSet) -> str:
     if result.content_type == "application/vnd.atlassian.jira.issue":
-        issue_type = result.snippet.split("|", 1)[0].strip().lower()
+        issue_type = result.snippet.split("|", 1)[0].strip().lower().rstrip(".")
         if issue_type == "epic":
             return "[E]" if icons is ICON_SETS["ascii"] else "\u2b22"
         if issue_type == "story":
@@ -374,7 +378,10 @@ class LazylensApp(App[None]):
 
     async def refresh_categories(self) -> None:
         with Index(self.db_path) as index:
-            categories = index.categories(source_key=self.selected_source_key)
+            if self.selected_source_type() == "jira" and self.selected_source_key:
+                categories = index.jira_structure(source_key=self.selected_source_key)
+            else:
+                categories = index.categories(source_key=self.selected_source_key)
         category_list = self.query_one("#categories", ListView)
         await category_list.clear()
         if not self.project_sources:
@@ -383,13 +390,14 @@ class LazylensApp(App[None]):
             self.selected_category_key = None
             await self.refresh_results()
             return
-        await category_list.extend(
-            [CategoryItem(None, self.icons), *[CategoryItem(category, self.icons) for category in categories]]
-        )
+        category_items = [CategoryItem(category, self.icons) for category in categories]
+        if self.selected_source_type() != "jira":
+            category_items = [CategoryItem(None, self.icons), *category_items]
+        await category_list.extend(category_items)
         category_list.index = 0
         self.selected_category_key = None
         self.pending_category_key = None
-        await self.refresh_results()
+        await self.refresh_primary_view()
 
     async def refresh_results(self, *, highlight_item_id: int | None = None) -> None:
         with Index(self.db_path) as index:
@@ -473,7 +481,7 @@ class LazylensApp(App[None]):
         self.query_text = value.strip()
         self.history.clear()
         self.result_stack.clear()
-        await self.refresh_results()
+        await self.refresh_primary_view()
         self.query_one("#results", ListView).focus()
 
     async def action_clear_search(self) -> None:
@@ -481,7 +489,7 @@ class LazylensApp(App[None]):
         self.result_stack.clear()
         search = self.query_one("#search", Input)
         search.value = ""
-        await self.refresh_results()
+        await self.refresh_primary_view()
         self.query_one("#results", ListView).focus()
 
     async def update_relations(self, result: SearchResult | None) -> None:
@@ -608,6 +616,15 @@ class LazylensApp(App[None]):
                 self.result_stack.clear()
                 await self.show_children(result, push_history=False)
                 return
+        if (
+            isinstance(item, CategoryItem)
+            and item.kind == "jira-project"
+            and self.selected_source_key is not None
+        ):
+            self.history.clear()
+            self.result_stack.clear()
+            await self.show_jira_epics(self.selected_source_key)
+            return
         self.history.clear()
         self.result_stack.clear()
         self.selected_category_key = self.pending_category_key
@@ -683,15 +700,38 @@ class LazylensApp(App[None]):
             self.push_result_stack()
         await self.replace_results(children)
 
+    async def show_jira_epics(self, source_key: str) -> None:
+        with Index(self.db_path) as index:
+            epics = index.jira_epics(source_key=source_key)
+        await self.replace_results(epics, empty_message="No Epics indexed for this Jira source")
+
+    async def refresh_primary_view(self) -> None:
+        if self.selected_source_type() == "jira" and not self.query_text and self.selected_source_key:
+            await self.show_jira_epics(self.selected_source_key)
+            return
+        await self.refresh_results()
+
     async def show_context_result(self, result: SearchResult, *, push_history: bool = True) -> None:
         if push_history:
             self.push_result_stack()
         await self.replace_results([result], highlight_item_id=result.id)
 
-    async def replace_results(self, results: list[SearchResult], *, highlight_item_id: int | None = None) -> None:
+    async def replace_results(
+        self,
+        results: list[SearchResult],
+        *,
+        highlight_item_id: int | None = None,
+        empty_message: str | None = None,
+    ) -> None:
         self.results = results
         result_list = self.query_one("#results", ListView)
         await result_list.clear()
+        if not results:
+            await result_list.append(MessageItem(empty_message or "No results"))
+            result_list.index = None
+            await self.update_current_result(None)
+            result_list.focus()
+            return
         await result_list.extend([ResultItem(result, self.icons, self.source_type(result)) for result in results])
         result_list.index = self.result_index(highlight_item_id)
         await self.update_current_result(results[result_list.index or 0])
@@ -767,6 +807,9 @@ class LazylensApp(App[None]):
 
     def source_type(self, result: SearchResult) -> str:
         return self.source_types.get(result.source_key, "local")
+
+    def selected_source_type(self) -> str:
+        return self.source_types.get(self.selected_source_key or "", "local")
 
 
 def run_tui(config_path: str | Path | None = None, db_path: str | Path | None = None) -> int:

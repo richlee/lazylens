@@ -26,8 +26,10 @@ SharePoint is planned next.
 - Cross-source relationship navigation: Confluence pages can lead into Jira
   Epics/Stories/Bugs and Jira issues can lead back to Confluence LLDs/KDDs.
 - Local folder indexing for Markdown, text, and other readable project files.
-- TUI structure navigation: source, top-level pages, folders, and child pages.
+- TUI project/source navigation with scoped `All` views, Confluence/page
+  structure, Jira roots, Epics, and Unparented tickets.
 - Browser/file opening from the selected page.
+- About popup with version, commit, credit, and tech stack.
 - Optional Nerd Font icon mode for richer terminal presentation.
 
 ## Install
@@ -86,9 +88,12 @@ lazylens index
 lazylens
 ```
 
-Inside the TUI, sources remain separate in the top row. The structure pane stays
-source-specific, while the outgoing/incoming relationship panes can cross
-between Confluence and Jira.
+Inside the TUI, projects and sources are selected separately. A project selection
+shows the combined project structure: `All`, Confluence/local document
+structure, Jira roots, Jira Epics, and Unparented Jira tickets. A source
+selection scopes both Structure and Pages to that source. The outgoing/incoming
+relationship panes can still cross between Confluence and Jira inside the
+selected project.
 
 For a no-credentials demo:
 
@@ -227,9 +232,14 @@ name = "Architecture"
 sources = ["personal-confluence", "personal-jira"]
 ```
 
-Projects group separately named sources into one working context. Search and
-relationship navigation use the selected project; the selected source controls
-the Structure panel.
+Projects group separately named sources into one working context. Selecting a
+project with `1`-`9` shows the whole project: `All` means all project sources,
+Structure includes Confluence/local document categories plus Jira roots, Epics,
+and Unparented entries, and relationship navigation can cross source boundaries.
+
+Selecting a source with `a`, `b`, `d`, etc. switches to source mode: `All` means
+that source only, Structure is limited to that source, and Pages resets to that
+source's overview. Selecting the project again returns to the full project view.
 
 For Confluence, `space_keys` is usually the friendliest scope to configure. You
 can also configure `space_ids` if you already know them. `page_limit` controls
@@ -253,13 +263,15 @@ Atlassian site root.
 
 ## TUI Keys
 
-- `1`-`9`: switch source
+- `1`-`9`: select project
+- `a`, `b`, `d`...: select source within the current project
 - `/`: focus search
 - `c`: clear search
 - `r`: refresh configured sources
 - `Enter`: select structure, open pages, or drill into folders
 - `Right` / `Space`: drill into page/folder children or follow selected links
 - `Left` / `Backspace`: go back from a drilled view
+- `?`: About
 - `q`: quit
 
 ## Icons

@@ -112,10 +112,10 @@ def test_tui_enter_opens_selected_result(tmp_path: Path, monkeypatch) -> None:
     assert opened == ["file:///architecture.md"]
 
 
-def test_tui_tabs_between_panes_and_skips_search(tmp_path: Path) -> None:
+def test_tui_enter_in_search_applies_query_without_opening(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
-    item = IndexedItem(
+    architecture = IndexedItem(
         source_key="local",
         item_key="architecture.md",
         title="Architecture Notes",
@@ -128,32 +128,43 @@ def test_tui_tabs_between_panes_and_skips_search(tmp_path: Path) -> None:
         container="architecture",
         snippet="Useful context about SharePoint and Confluence indexing.",
     )
+    release = IndexedItem(
+        source_key="local",
+        item_key="release.md",
+        title="Release Plan",
+        url="file:///release.md",
+        path="/tmp/release.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T12:00:00+00:00",
+        owner="",
+        category="Delivery",
+        container="delivery",
+        snippet="Milestones and release readiness.",
+    )
+    opened: list[str] = []
+    monkeypatch.setattr(tui, "open_url", opened.append)
 
     with Index(db_path) as index:
         index.upsert_source(source)
-        index.upsert_items([item])
+        index.upsert_items([architecture, release])
 
     async def run_app() -> None:
         app = LazylensApp(db_path=db_path)
         async with app.run_test() as pilot:
             await pilot.pause()
-            categories = app.query_one("#categories", ListView)
             results = app.query_one("#results", ListView)
             search = app.query_one("#search", Input)
 
             assert app.focused is results
-            await pilot.press("tab")
-            await pilot.pause()
-            assert app.focused is categories
-            await pilot.press("tab")
-            await pilot.pause()
-            assert app.focused is results
-
             await pilot.press("/")
             await pilot.pause()
             assert app.focused is search
-            await pilot.press("tab")
+            await pilot.press("r", "e", "l")
+            await pilot.press("enter")
             await pilot.pause()
-            assert app.focused is categories
+            assert app.focused is results
+            assert [result.title for result in app.results] == ["Release Plan"]
 
     asyncio.run(run_app())
+
+    assert opened == []

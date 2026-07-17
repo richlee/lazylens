@@ -44,8 +44,6 @@ class LazylensApp(App[None]):
     TITLE = "lazylens"
     BINDINGS = [
         Binding("/", "focus_search", "Search", show=False),
-        Binding("tab", "focus_next_pane", "Next Pane", show=False, priority=True),
-        Binding("shift+tab", "focus_previous_pane", "Previous Pane", show=False, priority=True),
         Binding("c", "clear_search", "Clear Search", show=False),
         Binding("r", "refresh_index", "Refresh", show=False),
         Binding("enter", "open_selected", "Open", show=False, priority=True),
@@ -211,9 +209,7 @@ class LazylensApp(App[None]):
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "search":
             return
-        self.query_text = event.value.strip()
-        await self.refresh_results()
-        self.query_one("#results", ListView).focus()
+        await self.apply_search(event.value)
 
     async def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.list_view.id == "categories" and isinstance(event.item, CategoryItem):
@@ -225,20 +221,10 @@ class LazylensApp(App[None]):
     def action_focus_search(self) -> None:
         self.query_one("#search", Input).focus()
 
-    def action_focus_next_pane(self) -> None:
-        self.focus_pane(1)
-
-    def action_focus_previous_pane(self) -> None:
-        self.focus_pane(-1)
-
-    def focus_pane(self, direction: int) -> None:
-        panes = [self.query_one("#categories", ListView), self.query_one("#results", ListView)]
-        focused = self.focused
-        try:
-            current_index = panes.index(focused)
-        except ValueError:
-            current_index = 0 if direction < 0 else len(panes) - 1
-        panes[(current_index + direction) % len(panes)].focus()
+    async def apply_search(self, value: str) -> None:
+        self.query_text = value.strip()
+        await self.refresh_results()
+        self.query_one("#results", ListView).focus()
 
     async def action_clear_search(self) -> None:
         self.query_text = ""
@@ -261,7 +247,13 @@ class LazylensApp(App[None]):
         await self.reload_from_db()
         self.notify(f"Indexed {indexed} items" + (f"; skipped {skipped} source(s)" if skipped else ""))
 
-    def action_open_selected(self) -> None:
+    async def action_open_selected(self) -> None:
+        focused = self.focused
+        if isinstance(focused, Input) and focused.id == "search":
+            await self.apply_search(focused.value)
+            return
+        if focused is not self.query_one("#results", ListView):
+            return
         result = self.selected_result()
         if result is None:
             self.notify("No result selected", severity="warning")

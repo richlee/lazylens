@@ -143,6 +143,7 @@ def resolve_spaces(
                 "id": str(result.get("id", "")),
                 "key": str(result.get("key", "")),
                 "name": str(result.get("name", result.get("key", ""))),
+                "homepageId": str(result.get("homepageId", "")),
             }
         )
     missing = sorted(set(space_keys) - {space["key"] for space in spaces})
@@ -163,17 +164,22 @@ def iter_space_pages(
     path = "/api/v2/pages"
     params: dict[str, Any] = {"space-id": [space["id"]], "body-format": "storage", "limit": limit}
     fetched_pages = 0
+    pages: list[dict[str, Any]] = []
 
     while path and fetched_pages < max_pages:
         payload = fetch_json(base_url, {"path": path, "params": params}, headers)
         fetched_pages += 1
         for page in payload.get("results", []):
             if isinstance(page, dict):
-                yield confluence_page_to_item(source, base_url, page, space)
+                pages.append(page)
 
         next_path = payload.get("_links", {}).get("next") if isinstance(payload.get("_links"), dict) else None
         path = str(next_path) if next_path else ""
         params = {}
+
+    hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")))
+    for page in pages:
+        yield confluence_page_to_item(source, base_url, page, space, hierarchy)
 
 
 def confluence_page_to_item(
@@ -181,6 +187,7 @@ def confluence_page_to_item(
     base_url: str,
     page: dict[str, Any],
     space: dict[str, str],
+    hierarchy: dict[str, dict[str, str]] | None = None,
 ) -> IndexedItem:
     page_id = str(page.get("id", ""))
     title = str(page.get("title", page_id or "Untitled"))
@@ -194,7 +201,8 @@ def confluence_page_to_item(
     page_links = html_links(storage_value, base_url)
     version = page.get("version", {}) if isinstance(page.get("version"), dict) else {}
     modified_at = str(version.get("createdAt") or page.get("createdAt") or datetime.now(timezone.utc).isoformat())
-    category = space.get("key") or space.get("name") or "Confluence"
+    structure = hierarchy.get(page_id, {}) if hierarchy else {}
+    category = structure.get("top_title") or space.get("key") or space.get("name") or "Confluence"
     return IndexedItem(
         source_key=source.key,
         item_key=page_id,
@@ -208,7 +216,40 @@ def confluence_page_to_item(
         container=space.get("name", category),
         snippet=snippet,
         links=tuple(page_links),
+        parent_key=str(page.get("parentId") or ""),
+        structure_type=str(page.get("type") or "page"),
     )
+
+
+def confluence_hierarchy(pages: list[dict[str, Any]], homepage_id: str) -> dict[str, dict[str, str]]:
+    page_by_id = {str(page.get("id", "")): page for page in pages}
+    hierarchy = {}
+    for page_id, page in page_by_id.items():
+        top = top_level_page(page, page_by_id, homepage_id)
+        hierarchy[page_id] = {
+            "top_id": str(top.get("id", "")) if top else page_id,
+            "top_title": str(top.get("title", "")) if top else str(page.get("title", "")),
+        }
+    return hierarchy
+
+
+def top_level_page(
+    page: dict[str, Any],
+    page_by_id: dict[str, dict[str, Any]],
+    homepage_id: str,
+) -> dict[str, Any] | None:
+    current = page
+    seen = set()
+    while current:
+        current_id = str(current.get("id", ""))
+        parent_id = str(current.get("parentId") or "")
+        if not parent_id or parent_id == homepage_id or parent_id not in page_by_id:
+            return current
+        if current_id in seen:
+            return current
+        seen.add(current_id)
+        current = page_by_id[parent_id]
+    return None
 
 
 def fetch_confluence_json(base_url: str, request: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:

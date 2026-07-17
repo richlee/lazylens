@@ -32,13 +32,22 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
     def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
         calls.append(request)
         if request["path"] == "/api/v2/spaces":
-            return {"results": [{"id": "123", "key": "ARCH", "name": "Architecture"}]}
+            return {"results": [{"id": "123", "key": "ARCH", "name": "Architecture", "homepageId": "100"}]}
         if request["path"] == "/api/v2/pages":
             return {
                 "results": [
                     {
+                        "id": "100",
+                        "title": "Architecture Home",
+                        "parentId": None,
+                        "_links": {"webui": "/spaces/ARCH/overview"},
+                        "body": {"storage": {"value": "<p>Home page for architecture.</p>"}},
+                        "version": {"createdAt": "2026-07-16T11:00:00.000Z"},
+                    },
+                    {
                         "id": "456",
                         "title": "API Decision",
+                        "parentId": "100",
                         "_links": {"webui": "/spaces/ARCH/pages/456/API+Decision"},
                         "body": {
                             "storage": {
@@ -62,18 +71,20 @@ def test_iter_confluence_items_resolves_space_and_maps_pages(monkeypatch: pytest
 
     assert calls[0]["params"]["keys"] == ["ARCH"]
     assert calls[1]["params"]["space-id"] == ["123"]
-    assert len(items) == 1
-    assert items[0].source_key == "work"
-    assert items[0].item_key == "456"
-    assert items[0].title == "API Decision"
-    assert items[0].url == "https://example.atlassian.net/wiki/spaces/ARCH/pages/456/API+Decision"
-    assert items[0].category == "ARCH"
-    assert items[0].container == "Architecture"
-    assert items[0].snippet == (
+    assert len(items) == 2
+    api_decision = next(item for item in items if item.title == "API Decision")
+    assert api_decision.source_key == "work"
+    assert api_decision.item_key == "456"
+    assert api_decision.url == "https://example.atlassian.net/wiki/spaces/ARCH/pages/456/API+Decision"
+    assert api_decision.category == "API Decision"
+    assert api_decision.container == "Architecture"
+    assert api_decision.parent_key == "100"
+    assert api_decision.structure_type == "page"
+    assert api_decision.snippet == (
         "Use a managed gateway because the team needs consistent authentication, routing, and observability before "
         "service ownership becomes more distributed."
     )
-    assert items[0].links == ("https://example.atlassian.net/wiki/spaces/ARCH/pages/789/HLD",)
+    assert api_decision.links == ("https://example.atlassian.net/wiki/spaces/ARCH/pages/789/HLD",)
 
 
 def test_iter_confluence_items_requires_default_token(monkeypatch: pytest.MonkeyPatch) -> None:

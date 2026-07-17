@@ -24,9 +24,11 @@ from lazylens.paths import default_config_path
 class CategoryItem(ListItem):
     def __init__(self, category: CategorySummary | None) -> None:
         self.category_key = category.key if category else None
+        self.item_id = category.item_id if category else None
+        self.kind = category.kind if category else "space"
         label = "All" if category is None else category.name
         count = "" if category is None else f" ({category.count})"
-        super().__init__(Label(f"{label}{count}", markup=False))
+        super().__init__(Label(f"{structure_icon(self.kind)} {label}{count}", markup=False))
 
 
 class ResultItem(ListItem):
@@ -374,6 +376,15 @@ class LazylensApp(App[None]):
         await self.refresh_categories()
 
     async def apply_structure_filter(self) -> None:
+        category_list = self.query_one("#categories", ListView)
+        item = category_list.highlighted_child
+        if isinstance(item, CategoryItem) and item.item_id is not None:
+            with Index(self.db_path) as index:
+                result = index.item_by_id(item.item_id)
+            if result is not None:
+                self.history.clear()
+                await self.show_context_result(result, push_history=False)
+                return
         self.history.clear()
         self.selected_category_key = self.pending_category_key
         await self.refresh_results()
@@ -538,3 +549,11 @@ def format_datetime(value: str) -> str:
     except ValueError:
         return value
     return parsed.strftime("%Y-%m-%d %H:%M")
+
+
+def structure_icon(kind: str) -> str:
+    if kind == "space":
+        return "[S]"
+    if kind == "page":
+        return "[P]"
+    return "[F]"

@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS items (
     category TEXT NOT NULL DEFAULT '',
     container TEXT NOT NULL DEFAULT '',
     snippet TEXT NOT NULL DEFAULT '',
+    parent_key TEXT NOT NULL DEFAULT '',
+    structure_type TEXT NOT NULL DEFAULT 'page',
     indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source_key, item_key)
 );
@@ -101,9 +103,9 @@ class Index:
                 """
                 INSERT INTO items (
                     source_key, item_key, title, url, path, content_type, modified_at,
-                    owner, category, container, snippet, indexed_at
+                    owner, category, container, snippet, parent_key, structure_type, indexed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(source_key, item_key) DO UPDATE SET
                     title = excluded.title,
                     url = excluded.url,
@@ -114,6 +116,8 @@ class Index:
                     category = excluded.category,
                     container = excluded.container,
                     snippet = excluded.snippet,
+                    parent_key = excluded.parent_key,
+                    structure_type = excluded.structure_type,
                     indexed_at = CURRENT_TIMESTAMP
                 RETURNING id
                 """,
@@ -129,6 +133,8 @@ class Index:
                     item.category,
                     item.container,
                     item.snippet,
+                    item.parent_key,
+                    item.structure_type,
                 ),
             )
             item_id = int(cursor.fetchone()["id"])
@@ -242,21 +248,40 @@ class Index:
         if source_key:
             rows = self.connection.execute(
                 """
-                SELECT category, COUNT(*) AS count
-                FROM items
-                WHERE source_key = ?
-                GROUP BY category
-                ORDER BY category COLLATE NOCASE
+                SELECT grouped.category,
+                       grouped.count,
+                       top_level.id AS item_id,
+                       COALESCE(top_level.structure_type, 'folder') AS kind
+                FROM (
+                    SELECT category, COUNT(*) AS count
+                    FROM items
+                    WHERE source_key = ?
+                    GROUP BY category
+                ) AS grouped
+                LEFT JOIN items AS top_level
+                  ON top_level.source_key = ?
+                 AND top_level.title = grouped.category
+                 AND top_level.structure_type = 'page'
+                ORDER BY grouped.category COLLATE NOCASE
                 """,
-                (source_key,),
+                (source_key, source_key),
             ).fetchall()
         else:
             rows = self.connection.execute(
                 """
-                SELECT category, COUNT(*) AS count
-                FROM items
-                GROUP BY category
-                ORDER BY category COLLATE NOCASE
+                SELECT grouped.category,
+                       grouped.count,
+                       top_level.id AS item_id,
+                       COALESCE(top_level.structure_type, 'folder') AS kind
+                FROM (
+                    SELECT category, COUNT(*) AS count
+                    FROM items
+                    GROUP BY category
+                ) AS grouped
+                LEFT JOIN items AS top_level
+                  ON top_level.title = grouped.category
+                 AND top_level.structure_type = 'page'
+                ORDER BY grouped.category COLLATE NOCASE
                 """
             ).fetchall()
         return [
@@ -264,10 +289,11 @@ class Index:
                 key=str(row["category"]),
                 name=str(row["category"]) or "Uncategorised",
                 count=int(row["count"]),
+                kind=str(row["kind"]),
+                item_id=int(row["item_id"]) if row["item_id"] is not None else None,
             )
             for row in rows
         ]
-
     def related_items(self, item_id: int, *, limit: int = 12) -> list[RelatedItem]:
         return [*self.outgoing_links(item_id, limit=limit), *self.incoming_links(item_id, limit=limit)][:limit]
 
@@ -355,6 +381,10 @@ class Index:
             self.connection.execute("ALTER TABLE items ADD COLUMN category TEXT NOT NULL DEFAULT ''")
         if "container" not in columns:
             self.connection.execute("ALTER TABLE items ADD COLUMN container TEXT NOT NULL DEFAULT ''")
+        if "parent_key" not in columns:
+            self.connection.execute("ALTER TABLE items ADD COLUMN parent_key TEXT NOT NULL DEFAULT ''")
+        if "structure_type" not in columns:
+            self.connection.execute("ALTER TABLE items ADD COLUMN structure_type TEXT NOT NULL DEFAULT 'page'")
 
         fts_columns = {
             str(row["name"])
@@ -407,6 +437,8 @@ def search_result_from_row(row: sqlite3.Row) -> SearchResult:
         container=str(row["container"]),
         snippet=str(row["snippet"]),
         rank=float(row["rank"]),
+        parent_key=str(row["parent_key"]),
+        structure_type=str(row["structure_type"]),
     )
 
 

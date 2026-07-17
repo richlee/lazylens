@@ -28,6 +28,8 @@ class CategorySummary:
     key: str
     name: str
     count: int
+    kind: str = "folder"
+    item_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,8 @@ class IndexedItem:
     container: str
     snippet: str
     links: tuple[str, ...] = field(default_factory=tuple)
+    parent_key: str = ""
+    structure_type: str = "page"
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,8 @@ class SearchResult:
     container: str
     snippet: str
     rank: float
+    parent_key: str = ""
+    structure_type: str = "page"
 
 
 @dataclass(frozen=True)

@@ -226,6 +226,59 @@ def test_tui_structure_selection_filters_only_on_enter(tmp_path: Path) -> None:
     asyncio.run(run_app())
 
 
+def test_tui_structure_enter_promotes_top_level_page(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)
+    product = IndexedItem(
+        source_key="local",
+        item_key="product.md",
+        title="Product Overview",
+        url="file:///product.md",
+        path="/tmp/product.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T13:00:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="Product context.",
+    )
+    child = IndexedItem(
+        source_key="local",
+        item_key="hld.md",
+        title="HLD",
+        url="file:///hld.md",
+        path="/tmp/hld.md",
+        content_type="text/markdown",
+        modified_at="2026-07-16T12:00:00+00:00",
+        owner="",
+        category="Product Overview",
+        container="product",
+        snippet="High level design.",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([product, child])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            categories = app.query_one("#categories", ListView)
+            results = app.query_one("#results", ListView)
+
+            assert len(app.results) == 2
+            categories.focus()
+            categories.index = 1
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert app.focused is results
+            assert [result.title for result in app.results] == ["Product Overview"]
+
+    asyncio.run(run_app())
+
+
 def test_tui_follows_relationships_into_center_context(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)

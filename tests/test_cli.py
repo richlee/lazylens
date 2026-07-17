@@ -140,7 +140,12 @@ type = "confluence"
 space_keys = ["LAZYLENS"]
 """
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    if os.name == "nt":
+        monkeypatch.setenv("APPDATA", str(config_home))
+        env_file = config_home / "lazylens" / "atlassian.env"
+    else:
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        env_file = config_home / "lazylens" / "atlassian.env"
     monkeypatch.delenv("CONFLUENCE_BASE_URL", raising=False)
     monkeypatch.delenv("CONFLUENCE_EMAIL", raising=False)
     monkeypatch.delenv("CONFLUENCE_API_TOKEN", raising=False)
@@ -148,7 +153,6 @@ space_keys = ["LAZYLENS"]
     assert main(["--config", str(config), "doctor"]) == 0
 
     output = capsys.readouterr().out
-    env_file = config_home / "lazylens" / "atlassian.env"
     assert f"Confluence env: {env_file} (not found)" in output
     assert "missing: CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN" in output
     assert f"source {env_file}" in output

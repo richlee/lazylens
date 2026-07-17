@@ -263,10 +263,10 @@ class LazylensApp(App[None]):
                 yield ListView(id="results")
                 yield Static(Text("No result selected"), id="preview")
             with Vertical(id="relations"):
-                yield Static(Text("Incoming"), id="incoming-title", classes="relation-title")
-                yield ListView(id="incoming")
                 yield Static(Text("Outgoing"), id="outgoing-title", classes="relation-title")
                 yield ListView(id="outgoing")
+                yield Static(Text("Incoming"), id="incoming-title", classes="relation-title")
+                yield ListView(id="incoming")
         yield Static(
             Text(
                 "Structure: Enter | Open/Drill: Enter | Drill/Follow: Right/Space | Back: Left/Backspace | "

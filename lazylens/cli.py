@@ -54,6 +54,8 @@ def render_confluence_source_config(
     *,
     key: str,
     name: str,
+    base_url: str,
+    email: str,
     space_keys: list[str],
     page_limit: int,
     max_pages: int,
@@ -63,6 +65,8 @@ def render_confluence_source_config(
         f"[sources.{json.dumps(key)}]",
         f"name = {json.dumps(name)}",
         'type = "confluence"',
+        f"base_url = {json.dumps(base_url)}",
+        f"email = {json.dumps(email)}",
         f"space_keys = {json.dumps(space_keys)}",
         f"page_limit = {page_limit}",
         f"max_pages = {max_pages}",
@@ -76,6 +80,8 @@ def render_jira_source_config(
     *,
     key: str,
     name: str,
+    base_url: str,
+    email: str,
     project_keys: list[str],
     issue_limit: int,
     max_pages: int,
@@ -85,6 +91,8 @@ def render_jira_source_config(
         f"[sources.{json.dumps(key)}]",
         f"name = {json.dumps(name)}",
         'type = "jira"',
+        f"base_url = {json.dumps(base_url)}",
+        f"email = {json.dumps(email)}",
         f"project_keys = {json.dumps(project_keys)}",
         f"issue_limit = {issue_limit}",
         f"max_pages = {max_pages}",
@@ -116,6 +124,8 @@ def append_confluence_source(
     database: Path,
     key: str,
     name: str,
+    base_url: str,
+    email: str,
     space_keys: list[str],
     page_limit: int,
     max_pages: int,
@@ -126,6 +136,8 @@ def append_confluence_source(
     source_text = render_confluence_source_config(
         key=key,
         name=name,
+        base_url=base_url,
+        email=email,
         space_keys=space_keys,
         page_limit=page_limit,
         max_pages=max_pages,
@@ -147,6 +159,8 @@ def append_jira_source(
     database: Path,
     key: str,
     name: str,
+    base_url: str,
+    email: str,
     project_keys: list[str],
     issue_limit: int,
     max_pages: int,
@@ -157,6 +171,8 @@ def append_jira_source(
     source_text = render_jira_source_config(
         key=key,
         name=name,
+        base_url=base_url,
+        email=email,
         project_keys=project_keys,
         issue_limit=issue_limit,
         max_pages=max_pages,
@@ -180,22 +196,29 @@ def write_confluence_env_skeleton(
     api_token_env: str,
     force: bool = False,
 ) -> bool:
-    if path.exists() and not force:
-        return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "\n".join(
-            [
-                "# lazylens Confluence Cloud API settings.",
-                "# Keep this file out of source control.",
-                f"export CONFLUENCE_BASE_URL={json.dumps(base_url)}",
-                f"export CONFLUENCE_EMAIL={json.dumps(email)}",
-                f"export {api_token_env}=\"\"",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    lines = [
+        "# lazylens Confluence Cloud API settings.",
+        "# Keep this file out of source control.",
+        f"# {base_url} ({email})",
+        f"export {api_token_env}=\"\"",
+        "",
+    ]
+    if path.exists() and not force:
+        text = path.read_text(encoding="utf-8")
+        additions = [
+            line
+            for line in lines
+            if line
+            and line.startswith("export ")
+            and line.split("=", 1)[0].removeprefix("export ") not in text
+        ]
+        if not additions:
+            return False
+        path.write_text(text.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8")
+        path.chmod(0o600)
+        return True
+    path.write_text("\n".join(lines), encoding="utf-8")
     path.chmod(0o600)
     return True
 
@@ -212,8 +235,7 @@ def write_jira_env_skeleton(
     lines = [
         "# lazylens Atlassian Cloud API settings.",
         "# Keep this file out of source control.",
-        f"export JIRA_BASE_URL={json.dumps(base_url)}",
-        f"export JIRA_EMAIL={json.dumps(email)}",
+        f"# {base_url} ({email})",
         f"export {api_token_env}=\"\"",
         "",
     ]
@@ -252,6 +274,23 @@ def append_demo_source(path: Path, *, source: SourceConfig, database: Path, forc
 name = {json.dumps(source.name)}
 type = "local"
 root = {json.dumps(str(source.root.expanduser()))}
+"""
+    path.write_text(text.rstrip() + addition, encoding="utf-8")
+
+
+def append_demo_project(path: Path) -> None:
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    if "[projects.demo]" in text or '[projects."demo"]' in text:
+        return
+    if "[projects." not in text:
+        return
+    addition = """
+
+[projects.demo]
+name = "Demo"
+sources = ["demo"]
 """
     path.write_text(text.rstrip() + addition, encoding="utf-8")
 
@@ -321,12 +360,16 @@ def command_init_confluence(args: argparse.Namespace) -> int:
     env_path = Path(args.env_file).expanduser() if args.env_file else default_confluence_env_path()
     key = "personal-confluence" if args.key == "local" else args.key
     name = "Personal Confluence" if args.name == "Local" else args.name
+    base_url = args.base_url or "https://example.atlassian.net"
+    email = args.email or "you@example.com"
     space_keys = args.space_key or ["LAZYLENS"]
     wrote_config = append_confluence_source(
         config_path,
         database=database,
         key=key,
         name=name,
+        base_url=base_url,
+        email=email,
         space_keys=space_keys,
         page_limit=args.page_limit,
         max_pages=args.max_pages,
@@ -335,8 +378,8 @@ def command_init_confluence(args: argparse.Namespace) -> int:
     )
     wrote_env = write_confluence_env_skeleton(
         env_path,
-        base_url=args.base_url or "https://example.atlassian.net",
-        email=args.email or "you@example.com",
+        base_url=base_url,
+        email=email,
         api_token_env=args.api_token_env,
         force=args.force_env,
     )
@@ -355,6 +398,8 @@ def command_init_jira(args: argparse.Namespace) -> int:
     env_path = Path(args.env_file).expanduser() if args.env_file else default_confluence_env_path()
     key = "personal-jira" if args.key == "local" else args.key
     name = "Personal Jira" if args.name == "Local" else args.name
+    base_url = args.base_url or "https://example.atlassian.net"
+    email = args.email or "you@example.com"
     project_keys = args.project_key or ["LAZYLENS"]
     api_token_env = "JIRA_API_TOKEN" if args.api_token_env == "CONFLUENCE_API_TOKEN" else args.api_token_env
     wrote_config = append_jira_source(
@@ -362,6 +407,8 @@ def command_init_jira(args: argparse.Namespace) -> int:
         database=database,
         key=key,
         name=name,
+        base_url=base_url,
+        email=email,
         project_keys=project_keys,
         issue_limit=args.issue_limit,
         max_pages=args.max_pages,
@@ -370,8 +417,8 @@ def command_init_jira(args: argparse.Namespace) -> int:
     )
     wrote_env = write_jira_env_skeleton(
         env_path,
-        base_url=args.base_url or "https://example.atlassian.net",
-        email=args.email or "you@example.com",
+        base_url=base_url,
+        email=email,
         api_token_env=api_token_env,
         force=args.force_env,
     )
@@ -391,6 +438,7 @@ def command_demo(args: argparse.Namespace) -> int:
     create_demo_files(demo_root)
     source = SourceConfig(key="demo", name="Demo Project", type="local", root=demo_root)
     append_demo_source(config_path, source=source, database=database, force=args.force_config)
+    append_demo_project(config_path)
     with Index(database) as index:
         report = refresh_source(index, source)
     print(f"Demo documents: {demo_root}")

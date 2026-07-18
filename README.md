@@ -102,6 +102,9 @@ lazylens demo
 lazylens
 ```
 
+If your config has explicit `[projects]`, `lazylens demo` also adds a small
+`Demo` project so the demo source is visible in the TUI.
+
 Useful commands:
 
 ```sh
@@ -130,6 +133,9 @@ Source scope belongs in:
 ```
 
 Token values should stay out of `config.toml` and out of source control.
+Atlassian site URLs and account emails can live on each source in
+`config.toml`; this lets one LazyLens config index multiple Atlassian sites or
+accounts in the same run.
 
 For personal or non-client testing, create a small Atlassian Cloud site, add a
 Confluence space and Jira project, create an API token from your Atlassian
@@ -215,6 +221,8 @@ root = "~/Documents/notes"
 [sources."personal-confluence"]
 name = "Personal Confluence"
 type = "confluence"
+base_url = "https://example.atlassian.net"
+email = "you@example.com"
 space_keys = ["ARCH"]
 page_limit = 100
 max_pages = 5
@@ -222,6 +230,8 @@ max_pages = 5
 [sources."personal-jira"]
 name = "Personal Jira"
 type = "jira"
+base_url = "https://example.atlassian.net"
+email = "you@example.com"
 project_keys = ["LAZY"]
 description_fields = ["description"]
 issue_limit = 100
@@ -256,10 +266,83 @@ project using a custom field can use:
 description_fields = ["description", "Description (DSP)"]
 ```
 
-If needed, `base_url`, `email`, or `api_token_env` can be set on Atlassian
-sources. Token values should stay out of TOML. `CONFLUENCE_BASE_URL` may be
-either the Atlassian site root or the `/wiki` URL; `JIRA_BASE_URL` should be the
+For Atlassian sources, prefer setting `base_url`, `email`, and `api_token_env`
+on each source. Token values should stay out of TOML and should be exported
+from `~/.config/lazylens/atlassian.env`. `CONFLUENCE_BASE_URL`,
+`CONFLUENCE_EMAIL`, `JIRA_BASE_URL`, and `JIRA_EMAIL` are still supported as
+fallbacks for simple one-account setups. `CONFLUENCE_BASE_URL` may be either
+the Atlassian site root or the `/wiki` URL; `JIRA_BASE_URL` should be the
 Atlassian site root.
+
+For multiple Atlassian accounts or tenants, give each source its own token
+environment variable:
+
+```toml
+[sources."client-a-confluence"]
+name = "Client A Confluence"
+type = "confluence"
+base_url = "https://client-a.atlassian.net"
+email = "a@example.com"
+api_token_env = "CLIENT_A_CONFLUENCE_TOKEN"
+space_keys = ["ARCH"]
+
+[sources."client-b-jira"]
+name = "Client B Jira"
+type = "jira"
+base_url = "https://client-b.atlassian.net"
+email = "b@example.com"
+api_token_env = "CLIENT_B_JIRA_TOKEN"
+project_keys = ["DEL"]
+```
+
+Then export only the secrets:
+
+```sh
+export CLIENT_A_CONFLUENCE_TOKEN="..."
+export CLIENT_B_JIRA_TOKEN="..."
+lazylens index
+```
+
+## Corporate Network TLS
+
+Some corporate networks inspect HTTPS traffic and re-sign certificates with an
+internal root certificate. If `lazylens index` can read local/demo sources but
+Confluence or Jira fail with:
+
+```text
+[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate
+```
+
+configure Python to trust a complete CA bundle. `lazylens` uses Python's
+standard `urllib` for Atlassian requests, so the important runtime variable is
+`SSL_CERT_FILE`. `REQUESTS_CA_BUNDLE` is useful for tools that use the
+`requests` library, but it is not enough by itself for LazyLens.
+
+Do not point `SSL_CERT_FILE` at only the corporate root certificate. That
+replaces Python's public CA bundle and can break normal public HTTPS trust.
+Instead, create a combined PEM bundle containing the normal public roots plus
+the corporate root/intermediate certificate, then export both variables:
+
+```sh
+export SSL_CERT_FILE="$HOME/.certs/python-public-plus-company.pem"
+export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+source ~/.config/lazylens/atlassian.env
+lazylens index
+```
+
+To confirm which Python executable `pipx` is using for LazyLens:
+
+```sh
+command -v lazylens
+head -1 "$(command -v lazylens)"
+```
+
+Use that interpreter when testing TLS, because it is the one that runs
+LazyLens:
+
+```sh
+/path/from/shebang/python -c "import ssl, urllib.request; print(ssl.get_default_verify_paths()); print(urllib.request.urlopen('https://example.atlassian.net', timeout=10).status)"
+```
 
 ## TUI Keys
 

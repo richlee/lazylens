@@ -158,6 +158,58 @@ def test_iter_confluence_items_uses_folder_nodes_for_page_hierarchy(monkeypatch:
     assert foldered.structure_type == "page"
 
 
+def test_iter_confluence_items_uses_homepage_child_walk_for_missing_folder_ancestors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SourceConfig(
+        key="work",
+        name="Work Confluence",
+        type="confluence",
+        settings={
+            "space_keys": ["ARCH"],
+        },
+    )
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.atlassian.net/wiki")
+    monkeypatch.setenv("CONFLUENCE_EMAIL", "rich@example.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "secret")
+
+    def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
+        if request["path"] == "/api/v2/spaces":
+            return {"results": [{"id": "123", "key": "ARCH", "name": "Architecture", "homepageId": "100"}]}
+        if request["path"] == "/api/v2/pages":
+            return {
+                "results": [
+                    {
+                        "id": "300",
+                        "title": "Decision Record",
+                        "parentId": "901",
+                        "_links": {"webui": "/spaces/ARCH/pages/300/Decision+Record"},
+                        "body": {"storage": {"value": "<p>Decision under nested folders.</p>"}},
+                    },
+                ],
+                "_links": {},
+            }
+        if request["path"] == "/api/v2/pages/100/direct-children":
+            return {"results": [{"id": "900", "title": "Architecture Root", "type": "folder", "parentId": "100"}]}
+        if request["path"] == "/api/v2/pages/900/direct-children":
+            return {"results": [{"id": "901", "title": "Decisions", "type": "folder", "parentId": "900"}]}
+        if request["path"].endswith("/direct-children"):
+            return {"results": []}
+        raise AssertionError(request)
+
+    items = iter_confluence_items(source, fetch_json=fetch_json)
+
+    root = next(item for item in items if item.title == "Architecture Root")
+    nested = next(item for item in items if item.title == "Decisions")
+    page = next(item for item in items if item.title == "Decision Record")
+    assert root.structure_type == "folder"
+    assert root.category == "Architecture Root"
+    assert nested.parent_key == "900"
+    assert nested.category == "Architecture Root"
+    assert page.parent_key == "901"
+    assert page.category == "Architecture Root"
+
+
 def test_iter_confluence_items_requires_default_token(monkeypatch: pytest.MonkeyPatch) -> None:
     source = SourceConfig(
         key="work",

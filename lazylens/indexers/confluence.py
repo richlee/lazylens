@@ -205,7 +205,14 @@ def iter_space_pages(
         params = {}
 
     complete = not path
-    structure_nodes = confluence_structure_nodes(base_url, headers, fetch_json, pages)
+    structure_nodes = confluence_structure_nodes(
+        base_url,
+        headers,
+        fetch_json,
+        pages,
+        homepage_id=str(space.get("homepageId", "")),
+        max_nodes=int(source.settings.get("structure_node_limit", 2_000)),
+    )
     hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")), structure_nodes)
     items: list[IndexedItem] = []
     seen_item_keys: set[str] = set()
@@ -347,19 +354,28 @@ def confluence_structure_nodes(
     headers: dict[str, str],
     fetch_json: JsonFetcher,
     pages: list[dict[str, Any]],
+    *,
+    homepage_id: str = "",
+    max_nodes: int = 2_000,
 ) -> dict[str, dict[str, Any]]:
     nodes = {str(page.get("id", "")): page for page in pages if page.get("id")}
-    for page in pages:
-        page_id = str(page.get("id", ""))
-        if not page_id:
+    queue = [node_id for node_id in [homepage_id, *nodes] if node_id]
+    visited: set[str] = set()
+    while queue and len(nodes) < max_nodes:
+        node_id = queue.pop(0)
+        if node_id in visited:
             continue
-        for child in confluence_direct_children(base_url, headers, fetch_json, page_id):
+        visited.add(node_id)
+        for child in confluence_direct_children(base_url, headers, fetch_json, node_id):
             child_id = str(child.get("id", ""))
             if not child_id or child_id in nodes:
                 continue
             if not child.get("parentId"):
-                child = {**child, "parentId": page_id}
+                child = {**child, "parentId": node_id}
             nodes[child_id] = child
+            queue.append(child_id)
+            if len(nodes) >= max_nodes:
+                break
     return nodes
 
 

@@ -123,6 +123,67 @@ def test_index_searches_items_with_fts(tmp_path: Path) -> None:
     assert categories[1].kind == "parent-page"
 
 
+def test_categories_resolve_folder_roots(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="conf", name="Confluence", type="confluence")
+    folder = IndexedItem(
+        source_key="conf",
+        item_key="folder-1",
+        title="Architecture Folder",
+        url="https://example.atlassian.net/wiki/folder-1",
+        path="ARCH/Architecture Folder",
+        content_type="application/vnd.atlassian.confluence.folder",
+        modified_at="2026-07-21T09:00:00+00:00",
+        owner="",
+        category="Architecture Folder",
+        container="Architecture",
+        snippet="",
+        structure_type="folder",
+    )
+    child_folder = IndexedItem(
+        source_key="conf",
+        item_key="folder-2",
+        title="Decisions",
+        url="https://example.atlassian.net/wiki/folder-2",
+        path="ARCH/Decisions",
+        content_type="application/vnd.atlassian.confluence.folder",
+        modified_at="2026-07-21T10:00:00+00:00",
+        owner="",
+        category="Architecture Folder",
+        container="Architecture",
+        snippet="",
+        parent_key="folder-1",
+        structure_type="folder",
+    )
+    child_page = IndexedItem(
+        source_key="conf",
+        item_key="page-1",
+        title="Decision Record",
+        url="https://example.atlassian.net/wiki/page-1",
+        path="ARCH/Decision Record",
+        content_type="text/html",
+        modified_at="2026-07-21T11:00:00+00:00",
+        owner="",
+        category="Architecture Folder",
+        container="Architecture",
+        snippet="Decision context.",
+        parent_key="folder-1",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([folder, child_folder, child_page])
+        categories = index.categories(source_key="conf")
+        children = index.children(source_key="conf", parent_key="folder-1")
+
+    assert len(categories) == 1
+    assert categories[0].name == "Architecture Folder"
+    assert categories[0].kind == "folder"
+    assert categories[0].item_id is not None
+    assert categories[0].count == 1
+    assert [child.title for child in children] == ["Decisions", "Decision Record"]
+
+
 def test_index_migrates_existing_database(tmp_path: Path) -> None:
     db_path = tmp_path / "old.sqlite3"
     connection = sqlite3.connect(db_path)

@@ -485,6 +485,74 @@ def test_tui_enter_drills_into_folder_result_and_back_restores_parent(tmp_path: 
     asyncio.run(run_app())
 
 
+def test_tui_structure_enter_on_folder_root_shows_folder_and_page_children(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    source = SourceConfig(key="conf", name="Confluence", type="confluence")
+    root_folder = IndexedItem(
+        source_key="conf",
+        item_key="folder-1",
+        title="Architecture Folder",
+        url="https://example.atlassian.net/wiki/folder-1",
+        path="ARCH/Architecture Folder",
+        content_type="application/vnd.atlassian.confluence.folder",
+        modified_at="2026-07-21T09:00:00+00:00",
+        owner="",
+        category="Architecture Folder",
+        container="Architecture",
+        snippet="",
+        structure_type="folder",
+    )
+    child_folder = IndexedItem(
+        source_key="conf",
+        item_key="folder-2",
+        title="Decisions",
+        url="https://example.atlassian.net/wiki/folder-2",
+        path="ARCH/Decisions",
+        content_type="application/vnd.atlassian.confluence.folder",
+        modified_at="2026-07-21T10:00:00+00:00",
+        owner="",
+        category="Architecture Folder",
+        container="Architecture",
+        snippet="",
+        parent_key="folder-1",
+        structure_type="folder",
+    )
+    child_page = IndexedItem(
+        source_key="conf",
+        item_key="page-1",
+        title="Decision Record",
+        url="https://example.atlassian.net/wiki/page-1",
+        path="ARCH/Decision Record",
+        content_type="text/html",
+        modified_at="2026-07-21T11:00:00+00:00",
+        owner="",
+        category="Architecture Folder",
+        container="Architecture",
+        snippet="Decision context.",
+        parent_key="folder-1",
+    )
+
+    with Index(db_path) as index:
+        index.upsert_source(source)
+        index.upsert_items([root_folder, child_folder, child_page])
+
+    async def run_app() -> None:
+        app = LazylensApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            categories = app.query_one("#categories", ListView)
+
+            assert [getattr(item, "kind", "") for item in categories.children] == ["space", "folder"]
+            categories.focus()
+            categories.index = 1
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert [result.title for result in app.results] == ["Decisions", "Decision Record"]
+
+    asyncio.run(run_app())
+
+
 def test_tui_right_drills_into_page_children_when_no_links_exist(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "index.sqlite3"
     source = SourceConfig(key="local", name="Local", type="local", root=tmp_path)

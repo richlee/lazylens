@@ -398,6 +398,7 @@ class Index:
                        top_level.id AS item_id,
                        CASE
                          WHEN top_level.id IS NULL THEN 'folder'
+                         WHEN top_level.structure_type = 'folder' THEN 'folder'
                          WHEN EXISTS (
                            SELECT 1
                            FROM items AS child
@@ -416,7 +417,7 @@ class Index:
                 LEFT JOIN items AS top_level
                   ON top_level.source_key = grouped.source_key
                  AND top_level.title = grouped.category
-                 AND top_level.structure_type = 'page'
+                 AND top_level.structure_type IN ('page', 'folder')
                 ORDER BY grouped.category COLLATE NOCASE
                 """,
                 (source_key,),
@@ -431,6 +432,7 @@ class Index:
                        top_level.id AS item_id,
                        CASE
                          WHEN top_level.id IS NULL THEN 'folder'
+                         WHEN top_level.structure_type = 'folder' THEN 'folder'
                          WHEN EXISTS (
                            SELECT 1
                            FROM items AS child
@@ -449,7 +451,7 @@ class Index:
                 LEFT JOIN items AS top_level
                   ON top_level.source_key = grouped.source_key
                  AND top_level.title = grouped.category
-                 AND top_level.structure_type = 'page'
+                 AND top_level.structure_type IN ('page', 'folder')
                 ORDER BY grouped.category COLLATE NOCASE
                 """,
                 tuple(project_source_keys),
@@ -463,6 +465,7 @@ class Index:
                        top_level.id AS item_id,
                        CASE
                          WHEN top_level.id IS NULL THEN 'folder'
+                         WHEN top_level.structure_type = 'folder' THEN 'folder'
                          WHEN EXISTS (
                            SELECT 1
                            FROM items AS child
@@ -480,7 +483,7 @@ class Index:
                 LEFT JOIN items AS top_level
                   ON top_level.source_key = grouped.source_key
                  AND top_level.title = grouped.category
-                 AND top_level.structure_type = 'page'
+                 AND top_level.structure_type IN ('page', 'folder')
                 ORDER BY grouped.category COLLATE NOCASE
                 """
             ).fetchall()

@@ -7,6 +7,7 @@ import pytest
 from lazylens.indexers.confluence import (
     ConfluenceError,
     confluence_base_url,
+    confluence_direct_children,
     html_links,
     html_snippet,
     html_to_text,
@@ -208,6 +209,48 @@ def test_iter_confluence_items_uses_homepage_child_walk_for_missing_folder_ances
     assert nested.category == "Architecture Root"
     assert page.parent_key == "901"
     assert page.category == "Architecture Root"
+
+
+def test_iter_confluence_items_uses_ancestors_when_parent_page_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SourceConfig(key="work", name="Work Confluence", type="confluence", settings={"space_keys": ["ARCH"]})
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.atlassian.net/wiki")
+    monkeypatch.setenv("CONFLUENCE_EMAIL", "rich@example.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "secret")
+
+    def fetch_json(_base_url: str, request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
+        if request["path"] == "/api/v2/spaces":
+            return {"results": [{"id": "123", "key": "ARCH", "name": "Architecture", "homepageId": "100"}]}
+        if request["path"] == "/api/v2/pages":
+            return {"results": [{"id": "300", "title": "Nested Decision", "parentId": "999", "body": {"storage": {"value": "<p>Decision</p>"}}}], "_links": {}}
+        if request["path"] == "/api/v2/pages/100/direct-children":
+            return {"results": [{"id": "200", "title": "Architecture Root", "type": "folder"}]}
+        if request["path"].endswith("/direct-children"):
+            return {"results": []}
+        if request["path"] == "/api/v2/pages/300/ancestors":
+            return {"results": [{"id": "100"}, {"id": "200"}, {"id": "999"}]}
+        raise AssertionError(request)
+
+    items = iter_confluence_items(source, fetch_json=fetch_json)
+
+    page = next(item for item in items if item.item_key == "300")
+    assert page.category == "Architecture Root"
+
+
+def test_confluence_direct_children_retries_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    def fetch_json(_base_url: str, _request: dict[str, Any], _headers: dict[str, str]) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ConfluenceError("temporary TLS failure")
+        return {"results": [{"id": "200", "title": "Child"}]}
+
+    monkeypatch.setattr("lazylens.indexers.confluence.time.sleep", lambda _delay: None)
+    assert confluence_direct_children("https://example.test", {}, fetch_json, "100") == [{"id": "200", "title": "Child"}]
+    assert attempts == 3
 
 
 def test_iter_confluence_items_requires_default_token(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -214,6 +215,15 @@ def iter_space_pages(
         max_nodes=int(source.settings.get("structure_node_limit", 2_000)),
     )
     hierarchy = confluence_hierarchy(pages, str(space.get("homepageId", "")), structure_nodes)
+    confluence_ancestor_hierarchy(
+        base_url,
+        headers,
+        fetch_json,
+        pages,
+        homepage_id=str(space.get("homepageId", "")),
+        structure_nodes=structure_nodes,
+        hierarchy=hierarchy,
+    )
     items: list[IndexedItem] = []
     seen_item_keys: set[str] = set()
     unchanged = 0
@@ -385,15 +395,21 @@ def confluence_direct_children(
     fetch_json: JsonFetcher,
     page_id: str,
 ) -> list[dict[str, Any]]:
-    try:
-        payload = fetch_json(
-            base_url,
-            {"path": f"/api/v2/pages/{page_id}/direct-children", "params": {"limit": 250}},
-            headers,
-        )
-    except ConfluenceError:
-        return []
-    return [child for child in payload.get("results", []) if isinstance(child, dict)]
+    error: ConfluenceError | None = None
+    for attempt in range(3):
+        try:
+            payload = fetch_json(
+                base_url,
+                {"path": f"/api/v2/pages/{page_id}/direct-children", "params": {"limit": 250}},
+                headers,
+            )
+            return [child for child in payload.get("results", []) if isinstance(child, dict)]
+        except ConfluenceError as exc:
+            error = exc
+            if attempt < 2:
+                time.sleep(0.25 * (2**attempt))
+    assert error is not None
+    raise ConfluenceError(f"Unable to retrieve Confluence children for page {page_id}: {error}") from error
 
 
 def confluence_hierarchy(
@@ -411,6 +427,52 @@ def confluence_hierarchy(
             "top_title": str(top.get("title", "")) if top else str(node.get("title", "")),
         }
     return hierarchy
+
+
+def confluence_ancestor_hierarchy(
+    base_url: str,
+    headers: dict[str, str],
+    fetch_json: JsonFetcher,
+    pages: list[dict[str, Any]],
+    *,
+    homepage_id: str,
+    structure_nodes: dict[str, dict[str, Any]],
+    hierarchy: dict[str, dict[str, str]],
+) -> None:
+    """Resolve page roots when Confluence exposes an inaccessible parentId.
+
+    Confluence can return a page whose ``parentId`` is no longer readable via
+    ``/pages/{id}``, while its ``/ancestors`` endpoint still carries the path
+    back to the space homepage.  Without this fallback each such page becomes
+    its own Structure category.
+    """
+    if not homepage_id:
+        return
+    for page in pages:
+        page_id = str(page.get("id", ""))
+        parent_id = str(page.get("parentId") or "")
+        if not page_id or not parent_id or parent_id in structure_nodes:
+            continue
+        try:
+            payload = fetch_json(
+                base_url,
+                {"path": f"/api/v2/pages/{page_id}/ancestors", "params": {"limit": 250}},
+                headers,
+            )
+        except ConfluenceError:
+            continue
+        ancestors = payload.get("results", [])
+        if not isinstance(ancestors, list):
+            continue
+        ancestor_ids = [str(ancestor.get("id", "")) for ancestor in ancestors if isinstance(ancestor, dict)]
+        try:
+            root_id = ancestor_ids[ancestor_ids.index(homepage_id) + 1]
+        except (ValueError, IndexError):
+            continue
+        root = structure_nodes.get(root_id)
+        root_title = str(root.get("title", "")) if root else ""
+        if root_title:
+            hierarchy[page_id] = {"top_id": root_id, "top_title": root_title}
 
 
 def top_level_node(
